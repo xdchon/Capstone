@@ -1,0 +1,5 @@
+# Keep cellpose (Unix-origin) as LF to avoid "LF will be replaced by CRLF" warnings
+Program/cellpose/** text eol=lf
+
+# Default: let Git handle other files
+* text=auto
