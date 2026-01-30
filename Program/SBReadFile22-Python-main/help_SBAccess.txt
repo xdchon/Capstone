@@ -1,0 +1,2393 @@
+Help on module SBAccess:
+
+NAME
+    SBAccess
+
+CLASSES
+    builtins.object
+        PointStruct
+        SBAccess
+    enum.Enum(builtins.object)
+        AuxDataTypes
+        MicroscopeHardwareComponent
+        MicroscopeStates
+    
+    class AuxDataTypes(enum.Enum)
+     |  AuxDataTypes(value, names=None, *, module=None, qualname=None, type=None, start=1)
+     |  
+     |  Enumeration of auxiliary data types
+     |  
+     |  Method resolution order:
+     |      AuxDataTypes
+     |      enum.Enum
+     |      builtins.object
+     |  
+     |  Data and other attributes defined here:
+     |  
+     |  eDoubleData = <AuxDataTypes.eDoubleData: 4>
+     |  
+     |  eFloatData = <AuxDataTypes.eFloatData: 3>
+     |  
+     |  eSInt32Data = <AuxDataTypes.eSInt32Data: 1>
+     |  
+     |  eSInt64Data = <AuxDataTypes.eSInt64Data: 2>
+     |  
+     |  eXMLData = <AuxDataTypes.eXMLData: 0>
+     |  
+     |  ----------------------------------------------------------------------
+     |  Data descriptors inherited from enum.Enum:
+     |  
+     |  name
+     |      The name of the Enum member.
+     |  
+     |  value
+     |      The value of the Enum member.
+     |  
+     |  ----------------------------------------------------------------------
+     |  Readonly properties inherited from enum.EnumMeta:
+     |  
+     |  __members__
+     |      Returns a mapping of member name->value.
+     |      
+     |      This mapping lists all enum members, including aliases. Note that this
+     |      is a read-only view of the internal mapping.
+    
+    class MicroscopeHardwareComponent(enum.Enum)
+     |  MicroscopeHardwareComponent(value, names=None, *, module=None, qualname=None, type=None, start=1)
+     |  
+     |  Enumeration of direct microscope hardware components for low-level access
+     |  and control within microscope systems.
+     |  
+     |  Method resolution order:
+     |      MicroscopeHardwareComponent
+     |      enum.Enum
+     |      builtins.object
+     |  
+     |  Data and other attributes defined here:
+     |  
+     |  AdaptiveOptics = <MicroscopeHardwareComponent.AdaptiveOptics: 26>
+     |  
+     |  AltSourceSelection = <MicroscopeHardwareComponent.AltSourceSelection: ...
+     |  
+     |  AuxFilterWheel = <MicroscopeHardwareComponent.AuxFilterWheel: 17>
+     |  
+     |  AuxFilterWheel10 = <MicroscopeHardwareComponent.AuxFilterWheel10: 43>
+     |  
+     |  AuxFilterWheel2 = <MicroscopeHardwareComponent.AuxFilterWheel2: 18>
+     |  
+     |  AuxFilterWheel3 = <MicroscopeHardwareComponent.AuxFilterWheel3: 19>
+     |  
+     |  AuxFilterWheel4 = <MicroscopeHardwareComponent.AuxFilterWheel4: 23>
+     |  
+     |  AuxFilterWheel5 = <MicroscopeHardwareComponent.AuxFilterWheel5: 28>
+     |  
+     |  AuxFilterWheel6 = <MicroscopeHardwareComponent.AuxFilterWheel6: 29>
+     |  
+     |  AuxFilterWheel7 = <MicroscopeHardwareComponent.AuxFilterWheel7: 34>
+     |  
+     |  AuxFilterWheel8 = <MicroscopeHardwareComponent.AuxFilterWheel8: 41>
+     |  
+     |  AuxFilterWheel9 = <MicroscopeHardwareComponent.AuxFilterWheel9: 42>
+     |  
+     |  AuxFluorescenceLamp = <MicroscopeHardwareComponent.AuxFluorescenceLamp...
+     |  
+     |  AuxZStage = <MicroscopeHardwareComponent.AuxZStage: 15>
+     |  
+     |  BeamExpander = <MicroscopeHardwareComponent.BeamExpander: 27>
+     |  
+     |  BrightfieldLamp = <MicroscopeHardwareComponent.BrightfieldLamp: 5>
+     |  
+     |  BrightfieldShutter = <MicroscopeHardwareComponent.BrightfieldShutter: ...
+     |  
+     |  CameraVideoPrism = <MicroscopeHardwareComponent.CameraVideoPrism: 12>
+     |  
+     |  EmissionFilterWheel = <MicroscopeHardwareComponent.EmissionFilterWheel...
+     |  
+     |  ExcitationFilterWheel = <MicroscopeHardwareComponent.ExcitationFilterW...
+     |  
+     |  FilterTurret = <MicroscopeHardwareComponent.FilterTurret: 1>
+     |  
+     |  FluorescenceLamp = <MicroscopeHardwareComponent.FluorescenceLamp: 14>
+     |  
+     |  FluorescenceShutter = <MicroscopeHardwareComponent.FluorescenceShutter...
+     |  
+     |  IncubatorControl = <MicroscopeHardwareComponent.IncubatorControl: 30>
+     |  
+     |  LCDFilter = <MicroscopeHardwareComponent.LCDFilter: 6>
+     |  
+     |  LaserAblationDevice = <MicroscopeHardwareComponent.LaserAblationDevice...
+     |  
+     |  LaserPowerControl = <MicroscopeHardwareComponent.LaserPowerControl: 25...
+     |  
+     |  LaserPowerMeter = <MicroscopeHardwareComponent.LaserPowerMeter: 32>
+     |  
+     |  LaserPowerMeter2 = <MicroscopeHardwareComponent.LaserPowerMeter2: 35>
+     |  
+     |  LaserPowerMeter3 = <MicroscopeHardwareComponent.LaserPowerMeter3: 36>
+     |  
+     |  LaserPowerMeter4 = <MicroscopeHardwareComponent.LaserPowerMeter4: 37>
+     |  
+     |  LaserTemperatureControl = <MicroscopeHardwareComponent.LaserTemperatur...
+     |  
+     |  Lightsheet = <MicroscopeHardwareComponent.Lightsheet: 33>
+     |  
+     |  ObjectiveTurret = <MicroscopeHardwareComponent.ObjectiveTurret: 9>
+     |  
+     |  OcularPhotoPrism = <MicroscopeHardwareComponent.OcularPhotoPrism: 11>
+     |  
+     |  OptovarTurret = <MicroscopeHardwareComponent.OptovarTurret: 10>
+     |  
+     |  PMTController1 = <MicroscopeHardwareComponent.PMTController1: 44>
+     |  
+     |  PMTController2 = <MicroscopeHardwareComponent.PMTController2: 45>
+     |  
+     |  PMTController3 = <MicroscopeHardwareComponent.PMTController3: 46>
+     |  
+     |  ReuseThisPosition = <MicroscopeHardwareComponent.ReuseThisPosition: 22...
+     |  
+     |  SACorrection = <MicroscopeHardwareComponent.SACorrection: 21>
+     |  
+     |  TIRFSlider = <MicroscopeHardwareComponent.TIRFSlider: 24>
+     |  
+     |  XYStage = <MicroscopeHardwareComponent.XYStage: 7>
+     |  
+     |  ZStage = <MicroscopeHardwareComponent.ZStage: 8>
+     |  
+     |  ----------------------------------------------------------------------
+     |  Data descriptors inherited from enum.Enum:
+     |  
+     |  name
+     |      The name of the Enum member.
+     |  
+     |  value
+     |      The value of the Enum member.
+     |  
+     |  ----------------------------------------------------------------------
+     |  Readonly properties inherited from enum.EnumMeta:
+     |  
+     |  __members__
+     |      Returns a mapping of member name->value.
+     |      
+     |      This mapping lists all enum members, including aliases. Note that this
+     |      is a read-only view of the internal mapping.
+    
+    class MicroscopeStates(enum.Enum)
+     |  MicroscopeStates(value, names=None, *, module=None, qualname=None, type=None, start=1)
+     |  
+     |  Enumeration of microscope state codes used to represent various 
+     |  hardware settings or readouts from a microscope control system.
+     |  
+     |  Method resolution order:
+     |      MicroscopeStates
+     |      enum.Enum
+     |      builtins.object
+     |  
+     |  Data and other attributes defined here:
+     |  
+     |  CurrentAltSource = <MicroscopeStates.CurrentAltSource: 10>
+     |  
+     |  CurrentAltZstagePosition = <MicroscopeStates.CurrentAltZstagePosition:...
+     |  
+     |  CurrentBFshutter = <MicroscopeStates.CurrentBFshutter: 9>
+     |  
+     |  CurrentBin = <MicroscopeStates.CurrentBin: 17>
+     |  
+     |  CurrentCondenserAperture = <MicroscopeStates.CurrentCondenserAperture:...
+     |  
+     |  CurrentCondenserPrismPosition = <MicroscopeStates.CurrentCondenserPris...
+     |  
+     |  CurrentFLshutter = <MicroscopeStates.CurrentFLshutter: 8>
+     |  
+     |  CurrentFilter = <MicroscopeStates.CurrentFilter: 2>
+     |  
+     |  CurrentFilterSet = <MicroscopeStates.CurrentFilterSet: 18>
+     |  
+     |  CurrentLampVoltage = <MicroscopeStates.CurrentLampVoltage: 7>
+     |  
+     |  CurrentLaserPower = <MicroscopeStates.CurrentLaserPower: 4>
+     |  
+     |  CurrentMagnification = <MicroscopeStates.CurrentMagnification: 3>
+     |  
+     |  CurrentNDAux = <MicroscopeStates.CurrentNDAux: 6>
+     |  
+     |  CurrentNDPrimary = <MicroscopeStates.CurrentNDPrimary: 5>
+     |  
+     |  CurrentObjective = <MicroscopeStates.CurrentObjective: 1>
+     |  
+     |  CurrentVideoOrCameraPosition = <MicroscopeStates.CurrentVideoOrCameraP...
+     |  
+     |  CurrentXYstagePosition = <MicroscopeStates.CurrentXYstagePosition: 11>
+     |  
+     |  CurrentZstagePosition = <MicroscopeStates.CurrentZstagePosition: 12>
+     |  
+     |  ----------------------------------------------------------------------
+     |  Data descriptors inherited from enum.Enum:
+     |  
+     |  name
+     |      The name of the Enum member.
+     |  
+     |  value
+     |      The value of the Enum member.
+     |  
+     |  ----------------------------------------------------------------------
+     |  Readonly properties inherited from enum.EnumMeta:
+     |  
+     |  __members__
+     |      Returns a mapping of member name->value.
+     |      
+     |      This mapping lists all enum members, including aliases. Note that this
+     |      is a read-only view of the internal mapping.
+    
+    class PointStruct(builtins.object)
+     |  PointStruct(x: 'float', y: 'float', z: 'float', aux_z: 'float', IsAuxZ: 'bool') -> None
+     |  
+     |  PointStruct(x: 'float', y: 'float', z: 'float', aux_z: 'float', IsAuxZ: 'bool')
+     |  
+     |  Methods defined here:
+     |  
+     |  __eq__(self, other)
+     |      Return self==value.
+     |  
+     |  __init__(self, x: 'float', y: 'float', z: 'float', aux_z: 'float', IsAuxZ: 'bool') -> None
+     |      Initialize self.  See help(type(self)) for accurate signature.
+     |  
+     |  __repr__(self)
+     |      Return repr(self).
+     |  
+     |  ----------------------------------------------------------------------
+     |  Data descriptors defined here:
+     |  
+     |  __dict__
+     |      dictionary for instance variables (if defined)
+     |  
+     |  __weakref__
+     |      list of weak references to the object (if defined)
+     |  
+     |  ----------------------------------------------------------------------
+     |  Data and other attributes defined here:
+     |  
+     |  __annotations__ = {'IsAuxZ': 'bool', 'aux_z': 'float', 'x': 'float', '...
+     |  
+     |  __dataclass_fields__ = {'IsAuxZ': Field(name='IsAuxZ',type='bool',defa...
+     |  
+     |  __dataclass_params__ = _DataclassParams(init=True,repr=True,eq=True,or...
+     |  
+     |  __hash__ = None
+     |  
+     |  __match_args__ = ('x', 'y', 'z', 'aux_z', 'IsAuxZ')
+    
+    class SBAccess(builtins.object)
+     |  SBAccess(inSocket)
+     |  
+     |  A Class to Read Slide Book Format 7 Files
+     |  
+     |  Methods defined here:
+     |  
+     |  AddXYZPoint(self, inXum, inYum, inZum, inAuxZum=0, inIsAuxZ=False)
+     |      Adds a point to the Focus Window XY Tab
+     |      
+     |       Parameters
+     |       ----------
+     |       inXum: float
+     |           The point X coordinate in microns
+     |      
+     |       inYum: float
+     |           The point Y coordinate in microns
+     |      
+     |       inZum: float
+     |           The point Z coordinate in microns
+     |      
+     |       inAuxZum: float
+     |           The auxiliary Z stage coordinate in microns
+     |      
+     |       inIsAuxZ: bool
+     |           True if the Auxiliary Z Stage is enabled, False otherwise
+     |      
+     |      Returns
+     |       -------
+     |           bool
+     |               Returns True if successful and False if not successful
+     |  
+     |  CaptureImage(self, CameraIndex, ExposureTimeMS)
+     |      Return an image from the specified camera
+     |      
+     |      Parameters
+     |      ----------
+     |      CameraIndex: int
+     |          The index of the image group. Must be in range(0, maximum number of cameras (6)) and the camera must be valid
+     |      ExposureTimeMS: int
+     |          The desired camera exposure time in milliseconds
+     |      
+     |      Returns
+     |      -------
+     |      width
+     |          The width in pixels
+     |      height
+     |          The height in pixels
+     |      numpy uint16 array 
+     |          The image is returned as 1D numpy uint16 array
+     |      bool
+     |          True (1) if success false (0) if failure
+     |  
+     |  ClearXYZPoints(self)
+     |      Clear all points in XYZ point list
+     |      
+     |       Parameters
+     |       ----------
+     |      Returns
+     |       -------
+     |       bool
+     |           Returns True if successful and False if not successful
+     |  
+     |  CloseSlide(self, inSlideId, inSaveChanges)
+     |      Close a slide
+     |      Parameters
+     |      ----------
+     |      inSlideId : int
+     |          The Slide Id
+     |      inSaveChanges
+     |          If the slide has been modified, save changes?
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          True if successful and false if failure (failure to save is most commonly caused by a new file without a pathname)
+     |  
+     |  ConfirmFocusWindow(self)
+     |      Confirms focus window is open and operational
+     |      
+     |      Parameters
+     |      ----------
+     |      
+     |      Returns
+     |      -------
+     |      bool
+     |          Returns True if successful and False if not successful
+     |  
+     |  CopyImageGroup(self, inCopyCaptureIndex)
+     |      Copy an image group from another one
+     |      
+     |      Parameters
+     |      ----------
+     |      inCopyCaptureIndex: int
+     |          The index of the source image group. Must be in range(0,number of captures)
+     |      Returns
+     |      -------
+     |      none
+     |  
+     |  CreateImageGroup(self, inImageName, inNumChannels, inNumPlanes, inNumRows, inNumColumns, inNumTimepoints)
+     |      creates a new image in the current slide
+     |      
+     |      Parameters
+     |      ----------
+     |      inImageName:    str
+     |          The name of the image
+     |      inNumChannels: int
+     |          The number of channels in the image. Must be in the range(1,8)
+     |      inNumPlanes: int
+     |          The number of planes in the image (numZ). Must be in the range(1,65535)
+     |      inNumRows: int
+     |          The number of rows in the image (numY). Must be in the range(2,2^11)
+     |      inNumColumns: int
+     |          The number of columns in the image (numX). Must be in the range(2,2^11)
+     |      inNumTimepoints: int
+     |          The number of timepoints in the image (numT). Must be in the range(1,2^11)
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          The index of the image group.
+     |  
+     |  CreateNewSlide(self)
+     |      Creates a new Slide
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          The Slide Id
+     |  
+     |  FocusSurface_AddCalibrationPoint(self, inXum, inYum, inZum, inAuxZum=0, inIsAuxZ=False)
+     |      Adds a calibration point to the Focus Surface
+     |      
+     |      Parameters
+     |      ----------
+     |      inXum: float
+     |          The point X coordinate in microns
+     |      
+     |      inYum: float
+     |          The point Y coordinate in microns
+     |      
+     |      inZum: float
+     |          The point Z coordinate in microns
+     |      
+     |      inAuxZum: float
+     |          The auxiliary Z stage coordinate in microns
+     |      
+     |      inIsAuxZ: bool
+     |          True if the Auxiliary Z Stage is enabled, False otherwise
+     |      
+     |      Returns
+     |      -------
+     |          bool
+     |              Returns True if successful and False if not successful
+     |  
+     |  FocusSurface_ClearCalibrationPoints(self)
+     |      Clear all calibration point of the Focus Surface
+     |      
+     |      Parameters
+     |      ----------
+     |      
+     |      Returns
+     |      -------
+     |          bool
+     |              Returns True if successful and False if not successful
+     |  
+     |  FocusSurface_FitPoint(self, inXum, inYum)
+     |      Fits a point with the Focus Surface
+     |      
+     |      Parameters
+     |      ----------
+     |      inXum: float
+     |          The point X coordinate in microns
+     |      
+     |      inYum: float
+     |          The point Y coordinate in microns
+     |      
+     |      Returns
+     |      -------
+     |          bool
+     |              Returns True if successful and False if not successful
+     |          float
+     |              The Z1 fitted coordinate
+     |          float
+     |              The Z2 fitted coordinate
+     |  
+     |  FocusSurface_FitSurface(self)
+     |      Fits a surface in the Focus Surface window
+     |      
+     |      Parameters
+     |      ----------
+     |      
+     |      Returns
+     |      -------
+     |          bool
+     |              Returns True if successful and False if not successful
+     |  
+     |  FocusSurface_IsSurfaceFit(self)
+     |      Fits a surface in the Focus Surface window
+     |      
+     |      Parameters
+     |      ----------
+     |      
+     |      Returns
+     |      -------
+     |          bool
+     |              Returns True if successful and False if not successful
+     |  
+     |  FocusSurface_Open(self, inIntParam=0)
+     |      Open the Focus Surface window
+     |      
+     |      Parameters
+     |      ----------
+     |      inIntParam: int
+     |          Flag: 0 to open for XY tab, 1 to open for MultiWell Tab
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          1 if is succesful, 0 otherwise
+     |  
+     |  FocusWindowGetARCSliceTIRFParameters(self, Position)
+     |      Gets the current arc / time-slice TIRF parameters for filter Position
+     |      
+     |      Parameters
+     |      ----------
+     |      Position: int
+     |          The filter position (0-20)
+     |      
+     |      Returns
+     |      -------
+     |      Arcs: int
+     |         arcs (see FocusWindowSetARCSliceTIRFParameters for parameter format)
+     |      Slices: int
+     |          slices (see FocusWindowSetARCSliceTIRFParameters for parameter format)
+     |      int
+     |          Returns success or failure
+     |  
+     |  FocusWindowGetTIRFParameters(self, Position)
+     |      Gets the current TIRF parameters for filter Position
+     |      
+     |      Parameters
+     |      ----------
+     |      Position: int
+     |          The filter position (0-20)
+     |      
+     |      Returns
+     |      -------
+     |      radius: int
+     |         spin radius (mV)
+     |      x: int
+     |          x center (mV)
+     |      y: int
+     |          y center (mV)
+     |      duration: float
+     |          spin duration (ms)
+     |      motor pos: int
+     |         stepper position
+     |      motor enable: int
+     |          enable stepper (0=false 1=true)
+     |      spin enable: int
+     |          enable spin (0=false 1=true)
+     |      int
+     |          1 if is succesful, 0 otherwise
+     |  
+     |  FocusWindowMainMoveX(self, inFloatParam)
+     |      Moves the XY stage in the X direction in the Focus Window
+     |      
+     |      Parameters
+     |      ----------
+     |      inFloatParam: float
+     |          The movement in microns in the X direction
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          1 if is succesful, 0 otherwise
+     |  
+     |  FocusWindowMainMoveY(self, inFloatParam)
+     |      Moves the XY stage in the Y direction in the Focus Window
+     |      
+     |      Parameters
+     |      ----------
+     |      inFloatParam: float
+     |          The movement in microns in the Y direction
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          1 if is succesful, 0 otherwise
+     |  
+     |  FocusWindowMainMoveZAuxilary(self, inFloatParam)
+     |      Moves the Z auxiliary stage in the Z direction in the Focus Window
+     |      
+     |      Parameters
+     |      ----------
+     |      inFloatParam: float
+     |          The movement in microns of the auxiliary stage in the Z direction
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          1 if is succesful, 0 otherwise
+     |  
+     |  FocusWindowMainMoveZPrimary(self, inFloatParam)
+     |      Moves the Z primary stage in the Z direction in the Focus Window
+     |      
+     |      Parameters
+     |      ----------
+     |      inFloatParam: float
+     |          The movement in microns of the primary stage in the Z direction
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          1 if is succesful, 0 otherwise
+     |  
+     |  FocusWindowMainSelectBin(self, inStringParam)
+     |      Selects a string in the Bin ComboBox of the Focus Window
+     |      
+     |      Parameters
+     |      ----------
+     |      inStringParam: string
+     |          One of the strings in the Bin ComboBox
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          1 if is succesful, 0 otherwise
+     |  
+     |  FocusWindowMainSelectChannel(self, inStringParam)
+     |      Selects a Channel in the Focus Window
+     |      
+     |      Parameters
+     |      ----------
+     |      inStringParam: string
+     |          The channel name
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          1 if is succesful, 0 otherwise
+     |  
+     |  FocusWindowMainSelectFilterSet(self, inStringParam)
+     |      Selects a string in the Filter Set ComboBox of the Focus Window
+     |      
+     |      Parameters
+     |      ----------
+     |      inStringParam: string
+     |          One of the strings in the Filter Set ComboBox
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          1 if is succesful, 0 otherwise
+     |  
+     |  FocusWindowMainSelectLaserPower(self, inStringParam)
+     |      Selects a string in the Laser Power ComboBox of the Focus Window
+     |      
+     |      Parameters
+     |      ----------
+     |      inStringParam: string
+     |          One of the strings in the Lser Power ComboBox
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          1 if is succesful, 0 otherwise
+     |  
+     |  FocusWindowMainSelectNDAuxiliary(self, inStringParam)
+     |      Selects a string in the Neutral Density Auxiliary ComboBox of the Focus Window
+     |      
+     |      Parameters
+     |      ----------
+     |      inStringParam: string
+     |          One of the strings in the Neutral Density Auxiliary ComboBox
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          1 if is succesful, 0 otherwise
+     |  
+     |  FocusWindowMainSelectNDPrimary(self, inStringParam)
+     |      Selects a string in the Neutral Density Primary ComboBox of the Focus Window
+     |      
+     |      Parameters
+     |      ----------
+     |      inStringParam: string
+     |          One of the strings in the Neutral Density Primary ComboBox
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          1 if is succesful, 0 otherwise
+     |  
+     |  FocusWindowMainSelectZStage(self, inStringParam)
+     |      Selects a string in the Z Stage ComboBox of the Focus Window
+     |      
+     |      Parameters
+     |      ----------
+     |      inStringParam: string
+     |          One of the strings in the Z Stage ComboBox
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          1 if is succesful, 0 otherwise
+     |  
+     |  FocusWindowMainSetAltClose(self)
+     |      Sets the Open Alt/Close Alt button to Close in the Focus Window
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          1 if is succesful, 0 otherwise
+     |  
+     |  FocusWindowMainSetAltOpen(self)
+     |      Set the Open Alt/Close Alt button to Open in the Focus Window
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          1 if is succesful, 0 otherwise
+     |  
+     |  FocusWindowMainSetBrightClose(self)
+     |      Sets the Open Bright/Close Bright button to Close in the Focus Window
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          1 if is succesful, 0 otherwise
+     |  
+     |  FocusWindowMainSetBrightOpen(self)
+     |      Set the Open Bright/Close Bright button to Open in the Focus Window
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          1 if is succesful, 0 otherwise
+     |  
+     |  FocusWindowMainSetExposure(self, inIntParam)
+     |      Sets the Exposure value in the Focus Window
+     |      
+     |      Parameters
+     |      ----------
+     |      inIntParam: int
+     |          The Exposure value
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          1 if is succesful, 0 otherwise
+     |  
+     |  FocusWindowMainSetFluorClose(self)
+     |      Sets the Open Fluor/Close Fluor button to Close in the Focus Window
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          1 if is succesful, 0 otherwise
+     |  
+     |  FocusWindowMainSetFluorOpen(self)
+     |      Sets the Open Fluor/Close Fluor button to Open in the Focus Window
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          1 if is succesful, 0 otherwise
+     |  
+     |  FocusWindowMainSetLive(self)
+     |      Sets the Live/Stop button to Live in the Focus Window
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          1 if is succesful, 0 otherwise
+     |  
+     |  FocusWindowMainSetSnap(self)
+     |      Snaps an image from the Live Window of the Focus Window
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          1 if is succesful, 0 otherwise
+     |  
+     |  FocusWindowMainSetStop(self)
+     |      Sets the Live/Stop button to Stop in the Focus Window
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          1 if is succesful, 0 otherwise
+     |  
+     |  FocusWindowScopeSelectCameraOrVideo(self, inIntParam)
+     |      Selects the Camera or the Video button in the Scope tab of the Focus Window
+     |      
+     |      Parameters
+     |      ----------
+     |      inIntParam: int
+     |          The value of 0 selects Camera
+     |          The value of 1 selects Video
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          1 if is succesful, 0 otherwise
+     |  
+     |  FocusWindowScopeSelectCondenserPosition(self, inStringParam)
+     |      Selects a string in the Condenser Position ComboBox of the Scope tab of the Focus Window
+     |      
+     |      Parameters
+     |      ----------
+     |      inStringParam: string
+     |          One of the strings in the Condenser Position ComboBox
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          1 if is succesful, 0 otherwise
+     |  
+     |  FocusWindowScopeSelectEmissionSelection(self, inIntParam)
+     |      Selects the 100% Camera or the 50%-50% or 100% Eyes button in the Scope tab of the Focus Window
+     |      
+     |      Parameters
+     |      ----------
+     |      inIntParam: int
+     |          The value of 0 selects 100% Camera
+     |          The value of 1 selects 50%-50%
+     |          The value of 2 selects 100% Eyes
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          1 if is succesful, 0 otherwise
+     |  
+     |  FocusWindowScopeSelectMagnificationChanger(self, inStringParam)
+     |      Selects a string in the Magnification Changer ComboBox of the Scope tab of the Focus Window
+     |      
+     |      Parameters
+     |      ----------
+     |      inStringParam: string
+     |          One of the strings in the Magnification Changer ComboBox
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          1 if is succesful, 0 otherwise
+     |  
+     |  FocusWindowScopeSelectObjective(self, inStringParam)
+     |      Selects one of the Objectives button in the Scope tab of the Focus Window. This function causes SlideBook to open an information popup
+     |      
+     |      Parameters
+     |      ----------
+     |      inStringParam: string
+     |          The name of the Objective to select
+     |      
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          1 if is succesful, 0 otherwise
+     |  
+     |  FocusWindowScopeSetCondenserAperture(self, inIntParam)
+     |      Sets the Condenser Aperture in the Scope tab of the Focus Window
+     |      
+     |      Parameters
+     |      ----------
+     |      inIntParam: int
+     |          The condenser aperture value
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          1 if is succesful, 0 otherwise
+     |  
+     |  FocusWindowScopeSetLampVoltage(self, inIntParam)
+     |      Sets the Lamp Voltage in the Scope tab of the Focus Window
+     |      
+     |      Parameters
+     |      ----------
+     |      inIntParam: int
+     |          The voltage value
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          1 if is succesful, 0 otherwise
+     |  
+     |  FocusWindowSetARCSliceTIRFParameters(self, Position, Arcs, Slices, Save)
+     |      Set the current arc / time slice parameters for TIRF filter Position
+     |      
+     |      Parameters
+     |      ----------
+     |      Position: int
+     |          The filter position (0-20)
+     |      Arcs: str
+     |         Comma-separated angles denoting start and stop angle (0.1 degrees) pairs. 0-3600 is a full circle.
+     |         450,900,1800,3600 defines two arc segments: 45-90 and then 180 to 360.
+     |         Minimum arc length is one-tenth degree.
+     |      Slices: str
+     |          Comma-separated list of filters to be concatenated together to create a virtual time-sliced TIRF channel.
+     |          Can include any number of specified TIRF channels (including the current position) and will use the duration
+     |          of Position (the specified filter) to create time-slice TIRF illumination.
+     |      Save: int
+     |          save as default settings (0=false 1=true)
+     |      
+     |      Returns
+     |      -------
+     |      bool
+     |          Returns success or failure
+     |  
+     |  FocusWindowSetTIRFParameters(self, Position, Radius_mV, X_mV, Y_mV, Duration_ms, MotorPos, MotorEnable, SpinEnable, Save)
+     |      Set the current parameters for TIRF filter Position
+     |      
+     |      Parameters
+     |      ----------
+     |      Position: int
+     |          The filter position (0-20)
+     |      radius: int
+     |         spin radius (mV)
+     |      x: int
+     |          x center (mV)
+     |      y: int
+     |          y center (mV)
+     |      duration: float
+     |          spin duration (ms)
+     |      motor pos: int
+     |         stepper position
+     |      motor enable: int
+     |          enable stepper (0=false 1=true)
+     |      spin enable: int
+     |          enable spin (0=false 1=true)
+     |      inSave: int
+     |          save as default settings (0=false 1=true)
+     |      
+     |      Returns
+     |      -------
+     |      bool
+     |          Returns success or failure
+     |  
+     |  FocusWindowStreamSetNumberFrames(self, inIntParam)
+     |      Sets the Number of Frames to capture in the Stream tab of the Focus Window
+     |      
+     |      Parameters
+     |      ----------
+     |      inIntParam: int
+     |          The number of frames to capture
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          1 if is succesful, 0 otherwise
+     |  
+     |  FocusWindowStreamSetNumberFramesToAverage(self, inStringParam)
+     |      Selects a string in the Number of frames to average ComboBox in the Stream tab of the Focus Window
+     |      
+     |      Parameters
+     |      ----------
+     |      inStringParam: string
+     |          One of the strings in the Number of frames to average ComboBox
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          1 if is succesful, 0 otherwise
+     |  
+     |  FocusWindowSupportsARCSliceTIRF(self)
+     |      Check if Arc/Slice TIRF is supported
+     |      Parameters
+     |      ----------
+     |      Returns
+     |      -------
+     |      bool
+     |          Returns supported
+     |  
+     |  GetAOOptimizerStatus(self)
+     |      Returns the current AO optimizer status and settings
+     |      
+     |      Parameters
+     |      ----------
+     |      none
+     |      
+     |      Returns
+     |      -------
+     |      Number of Zernike mode
+     |          Returns the number of Zernike modes
+     |      Zernike Modes
+     |          Returns an array of Zernike modes
+     |      Minimum Amplitude
+     |          The minimum amplitude
+     |      Maximum Amplitude
+     |          The maximum amplitude
+     |      Exposure Time MS
+     |          Exposure time (ms)
+     |      Iterations
+     |          Number of iterations
+     |      Merit Function
+     |          Name of merit function, or unknown
+     |      Result
+     |          1 = success 0 = failure
+     |  
+     |  GetAPIVersion(self)
+     |      Returns the current SlideBook build version
+     |      
+     |      Parameters
+     |      ----------
+     |      Returns
+     |      -------
+     |      Build Version : Int
+     |          Returns the current build version of the connected SlideBook
+     |  
+     |  GetAuxDataName(self, inCaptureIndex, inDataType: 'AuxDataTypes', inElementIndex)
+     |      Gets the Auxiliary Data Name for an image group, a data type, and an element index
+     |      inCaptureIndex: int
+     |          The index of the image group. Must be in range(0,number of captures)
+     |      inDataType: AuxDataTypes
+     |          The data type value from the AuxDataTypes enum
+     |      inElementIndex: int
+     |          The Element number
+     |      
+     |      Returns
+     |      -------
+     |      str
+     |          The Element name
+     |  
+     |  GetAuxDataNumElements(self, inCaptureIndex, inDataType: 'AuxDataTypes')
+     |      Gets the Auxiliary Data Number of Elements for an image group and a data type
+     |      Parameters
+     |      ----------
+     |      inCaptureIndex: int
+     |          The index of the image group. Must be in range(0,number of captures)
+     |      inDataType: AuxDataTypes
+     |          The data type value from the AuxDataTypes enum
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          The number of elements
+     |  
+     |  GetAuxDataValues(self, inCaptureIndex, inDataType: 'AuxDataTypes', inElementIndex)
+     |      Gets the Auxiliary Data Values for an image group, a data type, and an element index
+     |      Parameters
+     |      ----------
+     |      inCaptureIndex: int
+     |          The index of the image group. Must be in range(0,number of captures)
+     |      inDataType: AuxDataTypes
+     |          The data type value from the AuxDataTypes enum
+     |      inElementIndex: int
+     |          The element number
+     |      
+     |      Returns
+     |      -------
+     |      if inDataType is AuxDataTypes.eXMLData
+     |          returns two strings, the description and the xml string 
+     |      if inDataType is AuxDataTypes.eSInt32Data
+     |          returns an int 32 array
+     |      if inDataType is AuxDataTypes.eSInt64Data
+     |          returns an int 64 array
+     |      if inDataType is AuxDataTypes.eFloatData
+     |          returns a float 64 array
+     |      if inDataType is AuxDataTypes.eDoubleData
+     |          returns a double 64 array
+     |  
+     |  GetCaptureDate(self, inCaptureIndex)
+     |      Gets the date of acquisition of an image group
+     |      
+     |      Parameters
+     |      ----------
+     |      inCaptureIndex: int
+     |          The index of the image group. Must be in range(0,number of captures)
+     |      
+     |      Returns
+     |      -------
+     |      str
+     |          date is inhe format: yyyy:MM:dd:hh:mm:ss
+     |  
+     |  GetChannelName(self, inCaptureIndex, inChannelIndex)
+     |      Gets the name of a given channel of an image group
+     |      
+     |      Parameters
+     |      ----------
+     |      inCaptureIndex: int
+     |          The index of the image group. Must be in range(0,number of captures)
+     |      
+     |      inChannelIndex: int
+     |          The index of the channel. Must be in range(0,number of channels)
+     |      
+     |      Returns
+     |      -------
+     |      str
+     |          The name of the channel
+     |  
+     |  GetCurrentCaptureId(self, inPositionIndex)
+     |      Gets the id of the capture which is currently taking place.
+     |      
+     |      Parameters
+     |      ----------
+     |      inPositionIndex: int
+     |          The index of the montage position. For non montage capture, use 0
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          the capture id
+     |  
+     |  GetCurrentChannelCaptured(self)
+     |      Gets the index of the current Channel captured
+     |      
+     |      Parameters
+     |      ----------
+     |      inCaptureIndex: int
+     |          The index of the capture
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          thei channel number being captured
+     |  
+     |  GetCurrentExperimentCaptured(self)
+     |      Gets the index of the last plane captured
+     |      
+     |      Parameters
+     |      ----------
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          the experiment index being captured
+     |  
+     |  GetCurrentNumPositionsCaptured(self)
+     |      Gets the index of the last plane captured
+     |      
+     |      Parameters
+     |      ----------
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          the number of positions in the current experiment bein g captured
+     |  
+     |  GetCurrentPlaneCaptured(self)
+     |      Gets the index of the last plane captured
+     |      
+     |      Parameters
+     |      ----------
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          the index of the plane being captured
+     |  
+     |  GetCurrentPositionIndexCaptured(self)
+     |      Gets the index of the last plane captured
+     |      
+     |      Parameters
+     |      ----------
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          the position index of the current captured image
+     |  
+     |  GetCurrentSlideId(self)
+     |      Gets the Slide Id of the active slide
+     |      
+     |      Parameters
+     |      ----------
+     |          none
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          The Slide Id
+     |  
+     |  GetCurrentTimepointCaptured(self)
+     |      Gets the current timepoint being captured
+     |      
+     |      Parameters
+     |      ----------
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          the index (timepoint) of the current image captured
+     |  
+     |  GetElapsedTime(self, inCaptureIndex, inTimepointIndex)
+     |      Gets the elapsed time in ms at a given time point in an image group
+     |      
+     |      Parameters
+     |      ----------
+     |      inCaptureIndex: int
+     |          The index of the image group. Must be in range(0,number of captures)
+     |      inTimepointIndex: int
+     |          The time point number
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          The elapsed time in ms
+     |  
+     |  GetExposureTime(self, inCaptureIndex, inChannelIndex)
+     |      Gets the exposure time in ms for a particular channel of an image group
+     |      
+     |      Parameters
+     |      ----------
+     |      inCaptureIndex: int
+     |          The index of the image group. Must be in range(0,number of captures)
+     |      
+     |      inChannelIndex: int
+     |          The index of the channel. Must be in range(0,number of channels)
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          The exposure time in ms
+     |  
+     |  GetFilters(self)
+     |      Gets the filters
+     |      
+     |      Parameters
+     |      ----------
+     |          none
+     |      
+     |      Returns
+     |      -------
+     |      list
+     |          a list of CFluorDef70 objects
+     |  
+     |  GetHardwareComponentLocationMicrons(self, inComponentID: 'MicroscopeHardwareComponent')
+     |      Gets the current XYZ location of hardware component inComponentIndex
+     |      
+     |      Parameters
+     |      ----------
+     |      inComponentID: MicroscopeHardwareComponent
+     |          The component ID (0 <= inComponentID <= 46)
+     |      
+     |      Returns
+     |      -------
+     |      float
+     |          The X location in um (0 if unsupported)
+     |      float
+     |          The Y location in um (0 if unsupported)
+     |      float
+     |          The Z location in um (0 if unsupported)
+     |  
+     |  GetHardwareComponentMinMax(self, inComponentID: 'MicroscopeHardwareComponent')
+     |      Returns the device minimum and maximum hardware positions
+     |      
+     |      Parameters
+     |      ----------
+     |      inComponentID: MicroscopeHardwareComponent
+     |          The component ID (0 <= inComponentID <= 46)
+     |      
+     |      Returns
+     |      -------
+     |      list
+     |          Returns the minimum ([0]) and maximum ([1]) position of device inComponentID
+     |      result
+     |          Returns success (1) or failure (0)
+     |  
+     |  GetHardwareComponentName(self, inComponentID: 'MicroscopeHardwareComponent')
+     |      Returns the device name of a hardware component
+     |      
+     |      Parameters
+     |      ----------
+     |      inComponentID: MicroscopeHardwareComponent
+     |          The component ID (0 <= inComponentID <= 46)
+     |      
+     |      Returns
+     |      -------
+     |      list
+     |          Returns the device name of inComponentID. If not enabled returns keyword 'Empty'
+     |  
+     |  GetHardwareComponentOpen(self, inComponentID: 'MicroscopeHardwareComponent')
+     |      Gets the current position of a hardware device
+     |      
+     |      Parameters
+     |      ----------
+     |      inComponentID: MicroscopeHardwareComponent
+     |          The component ID (0 <= inComponentID <= 46)
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          Returns the current open/close state of device inComponentID (0 = closed 1 = open)
+     |      bool
+     |          Returns success or failure
+     |  
+     |  GetHardwareComponentPosition(self, inComponentID: 'MicroscopeHardwareComponent')
+     |      Gets the current position of a hardware device
+     |      
+     |      Parameters
+     |      ----------
+     |      inComponentID: MicroscopeHardwareComponent
+     |          The component ID (0 <= inComponentID <= 46)
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          Returns the current position of device inComponentID
+     |      int
+     |          Returns success (1) or failure (0)
+     |  
+     |  GetImageComment(self, inCaptureIndex)
+     |      Gets the comments of an image group
+     |      
+     |      Parameters
+     |      ----------
+     |      inCaptureIndex: int
+     |          The index of the image group. Must be in range(0,number of captures)
+     |      
+     |      Returns
+     |      -------
+     |      str
+     |          The comments of the image group
+     |  
+     |  GetImageHighRenormalization(self, inCaptureIndex, inChannelIndex)
+     |      Gets the default high renormalization value for channel
+     |      
+     |      Parameters
+     |      ----------
+     |      inCaptureIndex: int
+     |          The index of the image group. Must be in range(0,number of captures)
+     |      inChannelIndex: int
+     |          The channel number. Must be in range (0,number of channels)
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          The low renormalization value (0-65535)
+     |  
+     |  GetImageLowRenormalization(self, inCaptureIndex, inChannelIndex)
+     |      Gets the default low renormalization value for channel
+     |      
+     |      Parameters
+     |      ----------
+     |      inCaptureIndex: int
+     |          The index of the image group. Must be in range(0,number of captures)
+     |      inChannelIndex: int
+     |          The channel number. Must be in range (0,number of channels)
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          The low renormalization value (0-65535)
+     |  
+     |  GetImageName(self, inCaptureIndex)
+     |      Gets the name of an image group
+     |      
+     |      Parameters
+     |      ----------
+     |      inCaptureIndex: int
+     |          The index of the image group. Must be in range(0,number of captures)
+     |      
+     |      Returns
+     |      -------
+     |      str
+     |          The name of the image group
+     |  
+     |  GetIsHardwareComponentEnabled(self, inComponentID: 'MicroscopeHardwareComponent')
+     |      Checks if the hardware component is enabled
+     |      
+     |      Parameters
+     |      ----------
+     |      inComponentID: int
+     |          The component ID (0 <= inComponentID <= 46)
+     |      
+     |      Returns
+     |      -------
+     |      bool
+     |          True if is enabled, false if it is not
+     |  
+     |  GetIsSlideModified(self, inSlideId)
+     |      Get modified status of slide
+     |      Parameters
+     |      ----------
+     |      inSlideId : int
+     |          The Slide Id
+     |      
+     |      Returns
+     |      -------
+     |      bool
+     |          True if file has been modified since last save, false if the file has not been modified
+     |      int
+     |          True if successful and false if failure
+     |  
+     |  GetLastChannelCaptured(self, inCaptureIndex)
+     |      Gets the index of the last Channel captured
+     |      
+     |      Parameters
+     |      ----------
+     |      inCaptureIndex: int
+     |          The index of the capture
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          the index (plane) of the last plane captured
+     |  
+     |  GetLastImageCaptured(self, inCaptureIndex)
+     |      Gets the index of the last image captured
+     |      
+     |      Parameters
+     |      ----------
+     |      inCaptureIndex: int
+     |          The index of the capture
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          the index (timepoint) of the last image captured
+     |  
+     |  GetLastImageStreamed(self, inCaptureIndex)
+     |      Gets the index of the last image captured in streaming mode
+     |      
+     |      Parameters
+     |      ----------
+     |      inCaptureIndex: int
+     |          The index of the capture
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          the index (timepoint) of the last image captured
+     |  
+     |  GetLastPlaneCaptured(self, inCaptureIndex)
+     |      Gets the index of the last plane captured
+     |      
+     |      Parameters
+     |      ----------
+     |      inCaptureIndex: int
+     |          The index of the capture
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          the index (plane) of the last plane captured
+     |  
+     |  GetLensInfo(self)
+     |      Gets the lens info
+     |      
+     |      Parameters
+     |      ----------
+     |          none
+     |      
+     |      Returns
+     |      -------
+     |      str
+     |          the objectives
+     |  
+     |  GetLensName(self, inCaptureIndex)
+     |      Gets the name of the lens of an image group
+     |      
+     |      Parameters
+     |      ----------
+     |      inCaptureIndex: int
+     |          The index of the image group. Must be in range(0,number of captures)
+     |      
+     |      Returns
+     |      -------
+     |      str
+     |          The name of the lens
+     |  
+     |  GetMagnification(self, inCaptureIndex)
+     |      Gets the magnification of the lens of an image group
+     |      
+     |      Parameters
+     |      ----------
+     |      inCaptureIndex: int
+     |          The index of the image group. Must be in range(0,number of captures)
+     |      
+     |      Returns
+     |      -------
+     |      float
+     |          The magnification of the lens
+     |  
+     |  GetMagnificationChangers(self)
+     |      Gets the Magnification Changers
+     |      
+     |      Parameters
+     |      ----------
+     |          none
+     |      
+     |      Returns
+     |      -------
+     |      list
+     |          a list of COptovarDef70 objects
+     |  
+     |  GetMaskName(self, inCaptureIndex, inMaskIndex)
+     |      Gets the name of a mask
+     |      
+     |      Parameters
+     |      ----------
+     |      inCaptureIndex: int
+     |          The index of the image group. Must be in range(0,number of captures)
+     |      
+     |      inMaskIndex: int
+     |          The index of the mask. Must be in range(0,number of masks)
+     |      
+     |      Returns
+     |      -------
+     |      str
+     |          The name of the mask
+     |  
+     |  GetMicroscopeState(self, state: 'MicroscopeStates')
+     |      Gets a microscope state
+     |      Parameters
+     |      ----------
+     |      state: an enum from MicroscopeStates,
+     |         for example: GetMicroscopeState(MicroscopeStates.CurrentObjective)
+     |      
+     |      Returns
+     |      -------
+     |          depends from what is retrieved
+     |  
+     |  GetMontageColumn(self, inCaptureIndex, inPositionIndex)
+     |      Gets the number of columns of the montage at a given position in an image group
+     |      
+     |      Parameters
+     |      ----------
+     |      inCaptureIndex: int
+     |          The index of the image group. Must be in range(0,number of captures)
+     |      inPositionIndex: int
+     |          The position of an image whose column is to be retrieved
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          The column number (first column is 0)
+     |  
+     |  GetMontageRow(self, inCaptureIndex, inPositionIndex)
+     |      Gets the rows of the montage at a given position in an image group
+     |      
+     |      Parameters
+     |      ----------
+     |      inCaptureIndex: int
+     |          The index of the image group. Must be in range(0,number of captures)
+     |      inPositionIndex: int
+     |          The position of an image whose row is to be retrieved
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          The row number (first row is 0)
+     |  
+     |  GetNumCaptures(self)
+     |      Gets the number of captures (image groups) in the file
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          The number of captures
+     |  
+     |  GetNumChannels(self, inCaptureIndex)
+     |      Gets the number of channels in an image group
+     |      
+     |      Parameters
+     |      ----------
+     |      inCaptureIndex: int
+     |          The index of the image group. Must be in range(0,number of captures)
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          The number of channels
+     |  
+     |  GetNumImages(self, inCaptureIndex)
+     |      Gets the number of images in an image group
+     |      
+     |      Parameters
+     |      ----------
+     |      inCaptureIndex: int
+     |          The index of the image group. Must be in range(0,number of captures)
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          The number of images
+     |  
+     |  GetNumLiveCaptures(self)
+     |      Gets the number of live captures (image groups) in the file
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          The number of live captures
+     |  
+     |  GetNumMasks(self, inCaptureIndex)
+     |      Gets the number of masks in an image group
+     |      
+     |      Parameters
+     |      ----------
+     |      inCaptureIndex: int
+     |          The index of the image group. Must be in range(0,number of captures)
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          The number of masks
+     |  
+     |  GetNumPositions(self, inCaptureIndex)
+     |      Gets the number of (montage) positions in an image group
+     |      
+     |      Parameters
+     |      ----------
+     |      inCaptureIndex: int
+     |          The index of the image group. Must be in range(0,number of captures)
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          The number of positions
+     |  
+     |  GetNumTimepoints(self, inCaptureIndex)
+     |      Gets the number of time points in an image group
+     |      
+     |      Parameters
+     |      ----------
+     |      inCaptureIndex: int
+     |          The index of the image group. Must be in range(0,number of captures)
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          The number of time points
+     |  
+     |  GetNumXColumns(self, inCaptureIndex)
+     |      Gets the number of columns (width) of an image in an image group
+     |      
+     |      Parameters
+     |      ----------
+     |      inCaptureIndex: int
+     |          The index of the image group. Must be in range(0,number of captures)
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          The number of columns or width of the image
+     |  
+     |  GetNumYRows(self, inCaptureIndex)
+     |      Gets the number of rows (height) of an image in an image group
+     |      
+     |      Parameters
+     |      ----------
+     |      inCaptureIndex: int
+     |          The index of the image group. Must be in range(0,number of captures)
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          The number of rows or height of the image
+     |  
+     |  GetNumZPlanes(self, inCaptureIndex)
+     |      Gets the number of z planes of an image in an image group
+     |      
+     |      Parameters
+     |      ----------
+     |      inCaptureIndex: int
+     |          The index of the image group. Must be in range(0,number of captures)
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          The number of z planes of the image
+     |  
+     |  GetObjectives(self)
+     |      Gets the objectives
+     |      
+     |      Parameters
+     |      ----------
+     |          none
+     |      
+     |      Returns
+     |      -------
+     |      list
+     |          a list of CLensDef70 objects
+     |  
+     |  GetOpenSlides(self)
+     |      Gets a dictionary of  Slide Id  vs Pathname of all open slides
+     |      
+     |      Parameters
+     |      ----------
+     |          none
+     |      
+     |      Returns
+     |      -------
+     |      dict
+     |          The dictionary of IDs/SlideName(Pathname)
+     |  
+     |  GetVector3ScannerPosition(self)
+     |      Gets the current position of a hardware device
+     |      
+     |      Parameters
+     |      ----------
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          the current X position of stepper motor
+     |      int
+     |          the current Y position of stepper motor
+     |      int
+     |          current spin state (1=spin, 0=not)
+     |  
+     |  GetVector3StepperPosition(self)
+     |      Gets the current position of a hardware device
+     |      
+     |      Parameters
+     |      ----------
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          Returns the current position of stepper motor
+     |  
+     |  GetVoxelSize(self, inCaptureIndex)
+     |      Gets the voxel size in microns of an image group
+     |      
+     |      Parameters
+     |      ----------
+     |      inCaptureIndex: int
+     |          The index of the image group. Must be in range(0,number of captures)
+     |      
+     |      Returns
+     |      -------
+     |      float
+     |          The X voxel size in um
+     |      float
+     |          The Y voxel size in um
+     |      float
+     |          The Z voxel size in um
+     |  
+     |  GetXPosition(self, inCaptureIndex, inPositionIndex)
+     |      Gets the X position in microns of the center of an image of an image group
+     |      
+     |      Parameters
+     |      ----------
+     |      inCaptureIndex: int
+     |          The index of the image group. Must be in range(0,number of captures)
+     |      inPositionIndex: int
+     |          The index of the image in the montage, or 0 if all images are at the same location
+     |      
+     |      Returns
+     |      -------
+     |      float
+     |          The X position in um
+     |  
+     |  GetXYZMontagePointList(self, PointIndex)
+     |      If the selected XYZ point is a montage this functions returns a list of XYZ1Z2 points in the montage for the current camera / lens configuration.
+     |      
+     |       Parameters
+     |       ----------
+     |       PointIndex : int
+     |             Index in global experiment list (0 to GetXYZPointCount())
+     |      
+     |       Returns
+     |      ----------
+     |       NumPoints : int
+     |           Returns the number of XY points in the montage
+     |       Points: PointStruct
+     |           Array of point information
+     |       bool
+     |         Returns True if successful and False if not successful (for example, the index is out of bounds or the experiment is not setup as a montage)
+     |  
+     |  GetXYZPoint(self, PointIndex)
+     |      Returns the XYZ1Z2 position for the selected point
+     |       Parameters
+     |       PointIndex
+     |            Index in global experiment list (0 to GetXYZPointCount())
+     |      ----------
+     |      Returns
+     |      -------
+     |       PointStruct
+     |         Returns the XYZ1Z2 point
+     |       PointType
+     |         Returns the
+     |       bool
+     |           Returns True if successful and False if not successful
+     |  
+     |  GetXYZPointCount(self)
+     |      Returns the number of XY points in the XY point list
+     |      
+     |       Parameters
+     |       ----------
+     |      Returns
+     |       -------
+     |       NumPoints
+     |           Returns the number of XY points in the XY point list
+     |       bool
+     |           Returns True if successful and False if not successful
+     |  
+     |  GetXYZPointList(self)
+     |      Gets a list of all XYZ points in the Focus Window XY Tab
+     |      
+     |      Parameters
+     |      ----------
+     |      
+     |      Returns
+     |      -------
+     |      list
+     |          a list of strings . If there is no point list defined in the XY Tab, it returns the keyword 'Empty'
+     |  
+     |  GetXYZSavedExperimentName(self, inIndex)
+     |      Gets the name of a saved experiment
+     |      Parameters
+     |      ----------
+     |      inIndex: int
+     |          the experiment index
+     |      Returns
+     |      ----------
+     |          string, bool
+     |              Returns the experiment name as a string and true/false for success (bounds checking)
+     |              If the experiment is not set, the returned string is 'Default'
+     |  
+     |  GetYPosition(self, inCaptureIndex, inPositionIndex)
+     |      Gets the Y position in microns of the center of an image of an image group
+     |      
+     |      Parameters
+     |      ----------
+     |      inCaptureIndex: int
+     |          The index of the image group. Must be in range(0,number of captures)
+     |      inPositionIndex: int
+     |          The index of the image in the montage, or 0 if all images are at the same location
+     |      
+     |      Returns
+     |      -------
+     |      float
+     |          The Y position in um
+     |  
+     |  GetZPosition(self, inCaptureIndex, inPositionIndex, inZPlaneIndex)
+     |      Gets the Z position in microns of the center of an image of an image group
+     |      
+     |      Parameters
+     |      ----------
+     |      inCaptureIndex: int
+     |          The index of the image group. Must be in range(0,number of captures)
+     |      inPositionIndex: int
+     |          The index of the image in the montage, or 0 if all images are at the same location
+     |      
+     |      Returns
+     |      -------
+     |      float
+     |          The Z position in um
+     |  
+     |  IncrementHardwareComponentLocationMicrons(self, inComponentID: 'MicroscopeHardwareComponent', inXMicrons, inYMicrons, inZMicrons)
+     |      Increment the current XYZ position of a hardware device
+     |      
+     |      Parameters
+     |      ----------
+     |      inComponentID: MicroscopeHardwareComponent
+     |          The component ID (0 <= inComponentID <= 46)
+     |      x: float
+     |          The increment x micron position
+     |      y: float
+     |          The increment x micron position
+     |      z: float
+     |          The increment x micron position
+     |      
+     |      Returns
+     |      -------
+     |      bool
+     |          Returns success or failure
+     |  
+     |  IsCapturing(self)
+     |      Checks if there is an active capture
+     |      
+     |      Parameters
+     |      ----------
+     |      
+     |      Returns
+     |      -------
+     |      bool
+     |          True if is capturing, false if it is not
+     |  
+     |  IsStreaming(self)
+     |      Checks if there is an active streaming acquisition
+     |      
+     |      Parameters
+     |      ----------
+     |      
+     |      Returns
+     |      -------
+     |      bool
+     |          True if is capturing, false if it is not
+     |  
+     |  LiveWindowAddEllipseRegion(self, inWindowIndex, inX, inY, inWidth, inHeight, inIsStimulation=False)
+     |      Adds a elliptical region the a given Live Window
+     |      
+     |      Parameters
+     |      ----------
+     |      inWindowIndex: int
+     |          The live window index
+     |      inXum: int
+     |          The ellipse X left corner in pixels
+     |      inYum: int
+     |          The ellipse Y top corner in pixels
+     |      inWidth: int
+     |          The ellipse width in pixels
+     |      inHeight:int 
+     |          The ellipse height in pixels
+     |      inIsStimulation: bool
+     |          True if is a stimulation region, False otherwise
+     |  
+     |  LiveWindowAddLineRegion(self, inWindowIndex, inX, inY, inWidth, inHeight, inIsStimulation=False)
+     |      Adds a line region the a given Live Window
+     |      
+     |      Parameters
+     |      ----------
+     |      inWindowIndex: int
+     |          The live window index
+     |      inXum: int
+     |          The line X first point in pixels
+     |      inYum: int
+     |          The line Y first point in pixels
+     |      inWidth: int
+     |          The line X second point in pixels
+     |      inHeight:int 
+     |          The line Y second point in pixels
+     |      inIsStimulation: bool
+     |          True if is a stimulation region, False otherwise
+     |  
+     |  LiveWindowAddPolygonRegion(self, inWindowIndex, inXYPointList, inIsStimulation=False)
+     |      Adds a rectangular region the a given Live Window
+     |      
+     |      Parameters
+     |      ----------
+     |      inWindowIndex: int
+     |          The live window index
+     |      inXYPointList: list of int
+     |          a list of the polygon corners xy pixel coordinates
+     |      inIsStimulation: bool
+     |          True if is a stimulation region, False otherwise
+     |  
+     |  LiveWindowAddRectangleRegion(self, inWindowIndex, inX, inY, inWidth, inHeight, inIsStimulation=False)
+     |      Adds a rectangular region the a given Live Window
+     |      
+     |      Parameters
+     |      ----------
+     |      inWindowIndex: int
+     |          The live window index
+     |      inXum: int
+     |          The rectangle X left corner in pixels
+     |      inYum: int
+     |          The rectangle Y top corner in pixels
+     |      inWidth: int
+     |          The rectangle width in pixels
+     |      inHeight:int
+     |          The rectangle height in pixels
+     |      inIsStimulation: bool
+     |          True if is a stimulation region, False otherwise
+     |  
+     |  Open(self, inPath)
+     |      Open a SlideBook file and loads the Metadata
+     |      
+     |      Parameters
+     |      ----------
+     |      inPath : str
+     |          The path of the SlideBook file to open
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          The Slide Id
+     |  
+     |  ReadImagePlaneBuf(self, inCaptureIndex, inPositionIndex, inTimepointIndex, inZPlaneIndex, inChannelIndex)
+     |      Reads a z plane of an image into a numpy array
+     |      
+     |      Parameters
+     |      ----------
+     |      inCaptureIndex: int
+     |          The index of the image group. Must be in range(0,number of captures)
+     |      inPositionIndex: int
+     |          The position of the image. If the image group is not a montage, use 0
+     |      inTimepointIndex: int
+     |          The time point
+     |      inZPlaneIndex: int
+     |          The z plane number
+     |      inChannelIndex: int
+     |          The channel number
+     |      
+     |      Returns
+     |      -------
+     |      numpy uint16 array 
+     |          The image is returned as 1D numpy uint16 array
+     |  
+     |  ReadImagePlaneBufIx(self, inCaptureIndex, inImageIndex, inZPlaneIndex, inChannelIndex)
+     |      Reads a z plane of an image into a numpy array
+     |      
+     |      Parameters
+     |      ----------
+     |      inCaptureIndex: int
+     |          The index of the image group. Must be in range(0,number of captures)
+     |      inImageIndex: int
+     |          The Image index
+     |      inZPlaneIndex: int
+     |          The z plane number
+     |      inChannelIndex: int
+     |          The channel number
+     |      
+     |      Returns
+     |      -------
+     |      numpy uint16 array 
+     |          The image is returned as 1D numpy uint16 array
+     |  
+     |  ReadMaskPlaneBuf(self, inCaptureIndex, inMaskIndex, inTimepointIndex, inZPlaneIndex)
+     |      Reads a z plane of a mask into a numpy array
+     |      
+     |      Parameters
+     |      ----------
+     |      inCaptureIndex: int
+     |          The index of the image group. Must be in range(0,number of captures)
+     |      inMaskIndex: int
+     |          The nindex of the mask
+     |      inTimepointIndex: int
+     |          The time point
+     |      inZPlaneIndex: int
+     |          The z plane number
+     |      Returns
+     |      -------
+     |      numpy uint16 array 
+     |          The mask is returned as 1D numpy uint16 array
+     |  
+     |  Recv(self)
+     |  
+     |  RecvBigData(self, n)
+     |  
+     |  RunSavedScript(self, inStringParam)
+     |      Runs a script file
+     |      Parameters
+     |      ----------
+     |      inStringParam: string
+     |          The pathname of the script file
+     |      
+     |      Returns
+     |      -------
+     |          bool
+     |              Returns True if successful and False if not successful
+     |  
+     |  RunUserScript(self, inStringParam)
+     |      Runs a script file
+     |            Parameters
+     |            ----------
+     |            inStringParam: string
+     |                The multiline script to be run. Lines are sparated by a 
+     |      or a 
+     |      
+     |      
+     |            Returns
+     |            -------
+     |                bool
+     |                    Returns True if successful and False if not successful
+     |  
+     |  SaveAsSlide(self, inSlideId, inPathname)
+     |      Saves a slide
+     |      Parameters
+     |      ----------
+     |      inSlideId : int
+     |          The Slide Id
+     |      
+     |      inPathname : str
+     |          The pathname to save the slide with
+     |          
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          1 on success
+     |  
+     |  SaveSlide(self, inSlideId)
+     |      Saves a slide
+     |      Parameters
+     |      ----------
+     |      inSlideId : int
+     |          The Slide Id
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          1 on success
+     |  
+     |  SendByteArray(self, inBytes)
+     |  
+     |  SendCommand(self, inCommand)
+     |  
+     |  SendFloatParam(self, inCommandName, inFloatParam)
+     |  
+     |  SendIntParam(self, inCommandName, inIntParam)
+     |  
+     |  SendNullParam(self, inCommandName)
+     |  
+     |  SendStringParam(self, inCommandName, inStringParam)
+     |  
+     |  SendVal(self, inVal, inType)
+     |  
+     |  SetAOOptimizerExposureTime(self, inExposureTimeMS)
+     |      Set the open or close position of a hardware device
+     |      
+     |      Parameters
+     |      ----------
+     |      inExposureTimeMS
+     |          New exposure time in ms
+     |      
+     |      Returns
+     |      -------
+     |      string
+     |          Returns information about the status of the command
+     |      bool
+     |          Returns success or failure
+     |  
+     |  SetCaptureDate(self, inCaptureIndex, inYear, inMonth, inDay, inHour, inMinute, inSecond)
+     |      Sets the date of acquisition of an image group
+     |      
+     |      Parameters
+     |      ----------
+     |      inCaptureIndex: int
+     |          The index of the image group. Must be in range(0,number of captures)
+     |      inDateStr: str
+     |          date is in the format: yyyy:MM:dd:hh:mm:ss
+     |      
+     |      Returns
+     |      -------
+     |      none
+     |  
+     |  SetChannelName(self, inCaptureIndex, inChannelIndex, inChannelName)
+     |      Sets the name of an channel
+     |      
+     |      Parameters
+     |      ----------
+     |      inCaptureIndex: int
+     |          The index of the image group. Must be in range(0,number of captures)
+     |      inChannelIndex: int
+     |          The index of the channel in range(0,NumChannels-1)
+     |      inChannelName:  str
+     |          The name of the channel
+     |      
+     |      Returns
+     |      -------
+     |      none
+     |  
+     |  SetHardwareComponentLocationMicrons(self, inComponentID: 'MicroscopeHardwareComponent', inXMicrons, inYMicrons, inZMicrons)
+     |      Set the current XYZ position of a hardware device
+     |      
+     |      Parameters
+     |      ----------
+     |      inComponentID: MicroscopeHardwareComponent
+     |          The component ID (0 <= inComponentID <= 46)
+     |      x: float
+     |          The new x micron position
+     |      y: float
+     |          The new x micron position
+     |      z: float
+     |          The new x micron position
+     |      
+     |      Returns
+     |      -------
+     |      bool
+     |          Returns success or failure
+     |  
+     |  SetHardwareComponentOpen(self, inComponentID: 'MicroscopeHardwareComponent', inOpen)
+     |      Set the open or close position of a hardware device
+     |      
+     |      Parameters
+     |      ----------
+     |      inComponentID: MicroscopeHardwareComponent
+     |          The component ID (0 <= inComponentID <= 46)
+     |      inOpen: int
+     |          The new position (0 = closed 1 = open)
+     |      
+     |      Returns
+     |      -------
+     |      bool
+     |          Returns success or failure
+     |  
+     |  SetHardwareComponentPosition(self, inComponentID: 'MicroscopeHardwareComponent', inPosition)
+     |      Set the current position of a hardware device
+     |      
+     |      Parameters
+     |      ----------
+     |      inComponentID: MicroscopeHardwareComponent
+     |          The component ID (0 <= inComponentID <= 46)
+     |      inPosition: int
+     |          The new position
+     |      
+     |      Returns
+     |      -------
+     |      bool
+     |          Returns success or failure
+     |  
+     |  SetImageComment(self, inCaptureIndex, inComment)
+     |      Sets the comment (info) of an image group
+     |      
+     |      Parameters
+     |      ----------
+     |      inCaptureIndex: int
+     |          The index of the image group. Must be in range(0,number of captures)
+     |      inComment:    str
+     |          The comments of the image
+     |      
+     |      Returns
+     |      -------
+     |      none
+     |  
+     |  SetMagnification(self, inCaptureIndex, inLensMagnification, inOptovarMagnification)
+     |      Sets the Magnification of an image group
+     |      
+     |      Parameters
+     |      ----------
+     |      inCaptureIndex: int
+     |          The index of the image group. Must be in range(0,number of captures)
+     |      inMagnification: float
+     |          The inMagnification of the image
+     |      
+     |      Returns
+     |      -------
+     |      none
+     |  
+     |  SetTargetSlide(self, inSlideId)
+     |      Sets the target slide for subsequent operations 
+     |      
+     |      Parameters
+     |      ----------
+     |      int
+     |          The Slide Id
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          1 on success
+     |  
+     |  SetVector3ScannerPosition(self, inX_mV, inY_mV, inDisableSpin)
+     |      Set the current Vector3 scanner position
+     |      
+     |      Parameters
+     |      ----------
+     |      inX_mV: int
+     |          The new X position
+     |      inY_mV: int
+     |          The new Y position
+     |      inDisableSpin:
+     |          If true spin TIRF will be disabled
+     |      
+     |      Returns
+     |      -------
+     |      bool
+     |          Returns success or failure (command will fail if spin TIRF enabled and inDisableSpin is false)
+     |  
+     |  SetVector3StepperPosition(self, inPosition)
+     |      Set the current Vector3 stepper motor position
+     |      
+     |      Parameters
+     |      ----------
+     |      inPosition: int
+     |          The new position
+     |      
+     |      Returns
+     |      -------
+     |      bool
+     |          Returns success or failure
+     |  
+     |  SetVoxelSize(self, inCaptureIndex, inSizeX, inSizeY, inSizeZ)
+     |      Sets the voxel size in microns of an image group
+     |      
+     |      Parameters
+     |      ----------
+     |      inCaptureIndex: int
+     |          The index of the image group. Must be in range(0,number of captures)
+     |      inSizeX: float
+     |          The X voxel size in um
+     |      inSizeY: float
+     |          The Y voxel size in um
+     |      inSizeZ: float
+     |          The Z voxel size in um
+     |      
+     |      Returns
+     |      -------
+     |      none
+     |  
+     |  SetXYZPosition(self, inCaptureIndex, inPositionX, inPositionY, inPositionZ)
+     |      Sets the x,y,z position of an image group
+     |      
+     |      Parameters
+     |      ----------
+     |      inCaptureIndex: int
+     |          The index of the image group. Must be in range(0,number of captures)
+     |      inPositionX: float
+     |          The X Position
+     |      inPositionY: float
+     |          The Y Position
+     |      inPositionZ: float
+     |          The Z Position
+     |      
+     |      Returns
+     |      -------
+     |      none
+     |  
+     |  SetXYZSavedExperimentName(self, inIndex, inExperimentName)
+     |      Sets the name of an experiment at given index in the 6D tab, experiment list
+     |      Parameters
+     |      ----------
+     |      inIndex: int
+     |          the experiment index
+     |      string
+     |          the experiment name
+     |      Returns
+     |      ----------
+     |      bool
+     |          Return True/False based on bounds checking AND confirmation that the ExperimentName exists
+     |  
+     |  StartCapture(self, inScriptName='Default')
+     |      Starts a capture with an optional script name
+     |      Parameters
+     |      ----------
+     |      inScriptName: string
+     |          The script name to load before starting the capture. If blank, the Default script  is loaded
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          the capture id. If the capture failed to start, return -1
+     |  
+     |  StartStreaming(self)
+     |      Starts a streaming acquisition
+     |      Parameters
+     |      ----------
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          the capture id. If the streaming failed to start, return -1
+     |  
+     |  StopCapture(self)
+     |      Stops the current capture
+     |      Parameters
+     |      ----------
+     |      inScriptName: int
+     |          The script name to load before starting the capture. If blank, the Default script  is loaded
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          0
+     |  
+     |  StopStreaming(self)
+     |      Starts a streaming acquisition
+     |      Parameters
+     |      ----------
+     |      
+     |      Returns
+     |      -------
+     |      int
+     |          0
+     |  
+     |  WriteImagePlaneBuf(self, inCaptureIndex, inTimepointIndex, inZPlaneIndex, inChannelIndex, inNumpyArray)
+     |      Writes a z plane of an image from a numpy array
+     |      
+     |      Parameters
+     |      ----------
+     |      inCaptureIndex: int
+     |          The index of the image group. Must be in range(0,number of captures)
+     |      inTimepointIndex: int
+     |          The time point
+     |      inZPlaneIndex: int
+     |          The z plane number
+     |      inChannelIndex: int
+     |          The channel number. If the channel number (they start at 0) is equal to the number of channels, then a new channel is added
+     |      inNumpyArray: numpy array of u2 (unsigned 16 bit integer)
+     |          The data buffer for the plane to be written
+     |      
+     |      Returns
+     |      -------
+     |      none
+     |  
+     |  WriteMaskPlaneBuf(self, inCaptureIndex, inMaskName, inTimepointIndex, inZPlaneIndex, inNumpyArray)
+     |      Writes a z plane of a mask from a numpy array
+     |      
+     |      Parameters
+     |      ----------
+     |      inCaptureIndex: int
+     |          The index of the image group. Must be in range(0,number of captures)
+     |      inMaskName: str
+     |          The name of the mask
+     |      inTimepointIndex: int
+     |          The time point
+     |      inZPlaneIndex: int
+     |          The z plane number
+     |      inNumpyArray: numpy array of u2 (unsigned 16 bit integer)
+     |      
+     |      Returns
+     |      -------
+     |      none
+     |  
+     |  __init__(self, inSocket)
+     |      Initialize self.  See help(type(self)) for accurate signature.
+     |  
+     |  mysend(self, inBytes)
+     |  
+     |  ----------------------------------------------------------------------
+     |  Data descriptors defined here:
+     |  
+     |  __dict__
+     |      dictionary for instance variables (if defined)
+     |  
+     |  __weakref__
+     |      list of weak references to the object (if defined)
+
+DATA
+    __copyright__ = 'Copyright (c) 2022-2025, Intelligent Imaging Inn..., ...
+    __license__ = 'This source code is licensed under the BSD-style...E fi...
+    annotations = _Feature((3, 7, 0, 'beta', 1), (3, 11, 0, 'alpha', 0), 1...
+    descriptions = {<MicroscopeHardwareComponent.ExcitationFilterWheel: 0>...
+
+FILE
+    c:\users\nicola papp\perforce\nicola_msi_552\dev\sb_7.0_bcg\sbreadfile\dist\python\format 7\sbaccess.py
+
+
