@@ -1,4 +1,4 @@
-name: E:\Capstone Project - 1 Batch Files\Program\cellpose_env
+name: cellpose
 channels:
   - defaults
 dependencies:
@@ -102,4 +102,3 @@ dependencies:
       - urllib3==2.6.1
       - watchdog==6.0.0
       - zarr==3.1.5
-prefix: E:\Capstone Project - 1 Batch Files\Program\cellpose_env
