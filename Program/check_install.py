@@ -52,6 +52,10 @@ def _find_qt_windows_plugin() -> tuple[bool, str]:
         candidates.append(Path(env_plugin) / "platforms")
     if conda_prefix:
         candidates.append(Path(conda_prefix) / "Library" / "plugins" / "platforms")
+        candidates.append(Path(conda_prefix) / "Lib" / "site-packages" / "PyQt6" / "Qt6" / "plugins" / "platforms")
+        candidates.append(Path(conda_prefix) / "lib" / "site-packages" / "PyQt6" / "Qt6" / "plugins" / "platforms")
+        candidates.append(Path(conda_prefix) / "Lib" / "site-packages" / "PySide6" / "plugins" / "platforms")
+        candidates.append(Path(conda_prefix) / "lib" / "site-packages" / "PySide6" / "plugins" / "platforms")
 
     try:
         from qtpy.QtCore import QLibraryInfo  # type: ignore
@@ -72,9 +76,10 @@ def _find_qt_windows_plugin() -> tuple[bool, str]:
             unique_candidates.append(c)
 
     for c in unique_candidates:
-        dll = c / "qwindows.dll"
-        if dll.exists():
-            return True, f"{dll}"
+        if c.exists():
+            matches = sorted(c.glob("qwindows*.dll"))
+            if matches:
+                return True, f"{matches[0]}"
 
     diag = [
         f"QT_QPA_PLATFORM_PLUGIN_PATH={env_platform or '<unset>'}",

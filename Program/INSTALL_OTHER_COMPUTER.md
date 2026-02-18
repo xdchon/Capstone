@@ -28,7 +28,8 @@ conda activate cellpose-local
 python -m pip install --upgrade pip setuptools wheel
 python -m pip install -e ./Program/cellpose
 conda install -n cellpose-local -c conda-forge pyqt=6 qtpy pyqtgraph superqt qtbase -y
-powershell -ExecutionPolicy Bypass -File Program/setup_windows_qt_env.ps1 -PersistForCondaEnv
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\Program\setup_windows_qt_env.ps1 -PersistForCondaEnv
 ```
 
 ## Optional GPU torch install
@@ -53,7 +54,16 @@ python Program/SBReadFile22-Python-main/segment_5d_cellpose.py --help
 If `check_install.py` reports missing Qt Windows plugin, rerun:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File Program/setup_windows_qt_env.ps1 -PersistForCondaEnv
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\Program\setup_windows_qt_env.ps1 -PersistForCondaEnv
+```
+
+If it still fails and says `qwindows.dll` is missing, your environment has Qt Python packages but not the Windows platform plugin binaries. Repair by reinstalling one coherent Qt stack:
+
+```powershell
+conda install -n cellpose-local -c conda-forge pyqt=6 qtpy pyqtgraph superqt qtbase -y
+# OR
+python -m pip install --force-reinstall PyQt6 PyQt6-Qt6 qtpy pyqtgraph superqt
 ```
 
 ## Launch commands
