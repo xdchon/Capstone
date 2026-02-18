@@ -88,7 +88,9 @@ setup(
     url="https://github.com/MouseLand/cellpose", setup_requires=[
         'pytest-runner',
         'setuptools_scm',
-    ], packages=setuptools.find_packages(), use_scm_version=True,
+    ],
+    packages=setuptools.find_packages(),
+    use_scm_version={"fallback_version": "4.0.0"},
     install_requires=install_deps, tests_require=['pytest'], extras_require={
         'docs': docs_deps,
         'gui': gui_deps,

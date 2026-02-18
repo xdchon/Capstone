@@ -65,3 +65,11 @@ python -c "import cellpose; print(cellpose.__file__)"
 ```
 
 Path should point into this repo (`Program/cellpose/...`), not a global site-packages copy.
+
+If editable install fails with `setuptools-scm was unable to detect version`, your copy is missing git metadata for `Program/cellpose`. Use:
+
+```powershell
+$env:SETUPTOOLS_SCM_PRETEND_VERSION_FOR_CELLPOSE="4.0.0"
+python -m pip install -e ./Program/cellpose
+Remove-Item Env:\SETUPTOOLS_SCM_PRETEND_VERSION_FOR_CELLPOSE
+```
