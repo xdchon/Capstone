@@ -1,9 +1,16 @@
 Images
 Program/cellpose/.github
 Program/cellpose/.git
-Program/cellpose_env
-Program/matlab_env
-**/__pycache__
+
+# Local environments / caches
+Program/*_env/
+.venv/
+venv/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local data / notes
 Program/NLI_DB
 timepoint_0000.tif
 TODO

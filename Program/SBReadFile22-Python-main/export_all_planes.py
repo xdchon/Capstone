@@ -6,7 +6,7 @@ is stored under:
     <output_root>/<slide_stem>/capture_<id>/
 
 Example:
-python export_all_planes.py -i "E:\\...\\Images\\John\\Slide.sldyz"
+python export_all_planes.py -i "/path/to/Slide.sldyz"
 """
 
 import argparse
@@ -36,8 +36,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "-o",
         "--output-root",
-        default=str(Path("E:/Capstone Project - 1 Batch Files/Images/OUTPUTIMAGES")),
-        help="Root directory for exported images (default: Images/OUTPUTIMAGES).",
+        default=None,
+        help="Root directory for exported images. Defaults to Images/OUTPUTIMAGES if an Images parent exists, otherwise <slide_dir>/OUTPUTIMAGES.",
     )
     parser.add_argument(
         "--captures",
@@ -72,6 +72,13 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def default_output_root(slide_path: Path) -> Path:
+    for parent in slide_path.parents:
+        if parent.name.lower() == "images":
+            return parent / "OUTPUTIMAGES"
+    return slide_path.parent / "OUTPUTIMAGES"
+
+
 def normalize_indices(
     requested: Optional[Iterable[int]], total: int, label: str
 ) -> List[int]:
@@ -97,7 +104,11 @@ def export_slide(args: argparse.Namespace) -> None:
     if not slide_path.exists():
         raise SystemExit(f"Slide not found: {slide_path}")
 
-    output_root = Path(args.output_root)
+    output_root = (
+        Path(args.output_root).expanduser().resolve()
+        if args.output_root
+        else default_output_root(slide_path)
+    )
     slide_output_dir = output_root / slide_path.stem
     slide_output_dir.mkdir(parents=True, exist_ok=True)
 

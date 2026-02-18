@@ -204,9 +204,13 @@ def main() -> int:
     parser.add_argument("--no-matlab", action="store_true", help="Only load/compose RGB; don't connect to MATLAB.")
     args = parser.parse_args()
 
-    # Keep the original variables as a fallback for users who edit the script directly.
-    slide_dir = args.slide_dir or r"E:\Capstone Project - 1 Batch Files\Images\John\NIben_19_TriPer_CAT_TS_ON_v2_Capt3_DCN.dir"
-    capture_title = args.capture_title or "Capture 3 MLS Decon MIP XY-1759482556-506"
+    if not args.slide_dir:
+        parser.error("--slide-dir is required")
+    if not args.capture_title:
+        parser.error("--capture-title is required")
+
+    slide_dir = args.slide_dir
+    capture_title = args.capture_title
 
     slide_dir = _windows_to_wsl_path(slide_dir)
     slide_dir = str(Path(slide_dir))
