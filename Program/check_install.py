@@ -20,6 +20,10 @@ REQUIRED_IMPORTS = [
     ("torch", None),
     ("cellpose", None),
     ("SBReadFile", None),
+    ("PyQt6", None),
+    ("qtpy", None),
+    ("pyqtgraph", None),
+    ("superqt", None),
 ]
 
 
@@ -47,6 +51,17 @@ def main() -> int:
 
     if failures:
         print(f"\n{failures} check(s) failed.")
+        return 1
+
+    # Verify that qtpy can resolve an actual Qt binding.
+    try:
+        from qtpy import QtWidgets  # type: ignore
+
+        _ = QtWidgets.QApplication
+        print("[OK]   qtpy QtWidgets binding resolved")
+    except Exception as exc:
+        print(f"[FAIL] qtpy QtWidgets binding: {exc}")
+        print("[HINT] In PowerShell, try: Remove-Item Env:\\QT_API; $env:QT_API='pyqt6'")
         return 1
 
     try:

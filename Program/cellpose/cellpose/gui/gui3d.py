@@ -14,7 +14,7 @@ import cv2
 
 from . import guiparts, io
 from ..utils import download_url_to_file, masks_to_outlines
-from .gui import MainW
+from .gui import MainW, _ensure_qt_plugin_paths
 
 try:
     import matplotlib.pyplot as plt
@@ -73,6 +73,7 @@ def run(image=None):
     logger, log_file = logger_setup()
     # Always start by initializing Qt (only once per application)
     warnings.filterwarnings("ignore")
+    _ensure_qt_plugin_paths()
     app = QApplication(sys.argv)
     icon_path = pathlib.Path.home().joinpath(".cellpose", "logo.png")
     guip_path = pathlib.Path.home().joinpath(".cellpose", "cellpose_gui.png")

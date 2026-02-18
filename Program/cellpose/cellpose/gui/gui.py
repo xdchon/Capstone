@@ -345,11 +345,49 @@ def make_cmap(cm=0):
     return cmap
 
 
+def _ensure_qt_plugin_paths():
+    """Fill in Qt plugin paths when environment variables are missing/empty."""
+    plugin_path = os.environ.get("QT_PLUGIN_PATH", "").strip()
+    platform_path = os.environ.get("QT_QPA_PLATFORM_PLUGIN_PATH", "").strip()
+    if plugin_path and platform_path:
+        return
+
+    candidates = []
+    conda_prefix = os.environ.get("CONDA_PREFIX", "").strip()
+    if conda_prefix:
+        candidates.append(pathlib.Path(conda_prefix) / "Library" / "plugins")
+
+    try:
+        from qtpy.QtCore import QLibraryInfo
+
+        qt_plugins = QLibraryInfo.path(QLibraryInfo.LibraryPath.PluginsPath)
+        if qt_plugins:
+            candidates.append(pathlib.Path(qt_plugins))
+    except Exception:
+        pass
+
+    chosen = None
+    for candidate in candidates:
+        if candidate and candidate.exists():
+            chosen = candidate.resolve()
+            break
+    if chosen is None:
+        return
+
+    if not plugin_path:
+        os.environ["QT_PLUGIN_PATH"] = str(chosen)
+
+    platform_dir = chosen / "platforms"
+    if not platform_path and platform_dir.exists():
+        os.environ["QT_QPA_PLATFORM_PLUGIN_PATH"] = str(platform_dir)
+
+
 def run(image=None):
     from ..io import logger_setup
     logger, log_file = logger_setup()
     # Always start by initializing Qt (only once per application)
     warnings.filterwarnings("ignore")
+    _ensure_qt_plugin_paths()
     app = QApplication(sys.argv)
     icon_path = pathlib.Path.home().joinpath(".cellpose", "logo.png")
     guip_path = pathlib.Path.home().joinpath(".cellpose", "cellposeSAM_gui.png")
