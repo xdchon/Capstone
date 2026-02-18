@@ -12,6 +12,11 @@ This repo has a local `cellpose` fork, so installation must use the local source
 
 That combination is not portable and often fails to solve/install on a second machine.
 
+You also hit two independent Windows-specific issues:
+- Editable install error from `setuptools-scm` when `Program/cellpose` has no usable git metadata in the copied folder.
+- Qt runtime plugin resolution error (`qwindows.dll`) where Qt imports succeed but GUI startup fails with:
+  `Could not find the Qt platform plugin "windows" in ""`.
+
 ## Clean install steps
 
 Run these commands from the repository root (the folder that contains `Program/`):
@@ -22,7 +27,8 @@ conda env create -f Program/cellpose_env.yml
 conda activate cellpose-local
 python -m pip install --upgrade pip setuptools wheel
 python -m pip install -e ./Program/cellpose
-python -m pip install pyqt6 pyqt6-sip pyqtgraph qtpy superqt
+conda install -n cellpose-local -c conda-forge pyqt=6 qtpy pyqtgraph superqt qtbase -y
+powershell -ExecutionPolicy Bypass -File Program/setup_windows_qt_env.ps1 -PersistForCondaEnv
 ```
 
 ## Optional GPU torch install
@@ -42,6 +48,12 @@ Use the CUDA index URL that matches your NVIDIA driver/toolkit.
 python Program/check_install.py
 python -m cellpose --version
 python Program/SBReadFile22-Python-main/segment_5d_cellpose.py --help
+```
+
+If `check_install.py` reports missing Qt Windows plugin, rerun:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File Program/setup_windows_qt_env.ps1 -PersistForCondaEnv
 ```
 
 ## Launch commands

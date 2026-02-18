@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import importlib
+import os
 import sys
 from pathlib import Path
 
@@ -37,6 +38,53 @@ def check_import(module_name: str, package_hint: str | None) -> tuple[bool, str]
         return False, f"{exc} (try: python -m pip install {hint})"
 
 
+def _find_qt_windows_plugin() -> tuple[bool, str]:
+    """Return whether qwindows.dll is discoverable, plus diagnostics."""
+    candidates: list[Path] = []
+
+    env_platform = os.environ.get("QT_QPA_PLATFORM_PLUGIN_PATH", "").strip()
+    env_plugin = os.environ.get("QT_PLUGIN_PATH", "").strip()
+    conda_prefix = os.environ.get("CONDA_PREFIX", "").strip()
+
+    if env_platform:
+        candidates.append(Path(env_platform))
+    if env_plugin:
+        candidates.append(Path(env_plugin) / "platforms")
+    if conda_prefix:
+        candidates.append(Path(conda_prefix) / "Library" / "plugins" / "platforms")
+
+    try:
+        from qtpy.QtCore import QLibraryInfo  # type: ignore
+
+        qt_plugins = QLibraryInfo.path(QLibraryInfo.LibraryPath.PluginsPath)
+        if qt_plugins:
+            candidates.append(Path(qt_plugins) / "platforms")
+            candidates.append(Path(qt_plugins))
+    except Exception:
+        pass
+
+    seen: set[str] = set()
+    unique_candidates: list[Path] = []
+    for c in candidates:
+        key = str(c.resolve()) if c.exists() else str(c)
+        if key not in seen:
+            seen.add(key)
+            unique_candidates.append(c)
+
+    for c in unique_candidates:
+        dll = c / "qwindows.dll"
+        if dll.exists():
+            return True, f"{dll}"
+
+    diag = [
+        f"QT_QPA_PLATFORM_PLUGIN_PATH={env_platform or '<unset>'}",
+        f"QT_PLUGIN_PATH={env_plugin or '<unset>'}",
+        f"CONDA_PREFIX={conda_prefix or '<unset>'}",
+        "searched=" + "; ".join(str(c) for c in unique_candidates) if unique_candidates else "searched=<none>",
+    ]
+    return False, " | ".join(diag)
+
+
 def main() -> int:
     failures = 0
 
@@ -63,6 +111,19 @@ def main() -> int:
         print(f"[FAIL] qtpy QtWidgets binding: {exc}")
         print("[HINT] In PowerShell, try: Remove-Item Env:\\QT_API; $env:QT_API='pyqt6'")
         return 1
+
+    if sys.platform.startswith("win"):
+        ok, detail = _find_qt_windows_plugin()
+        if ok:
+            print(f"[OK]   Qt Windows plugin found: {detail}")
+        else:
+            print(f"[FAIL] Qt Windows plugin not found: {detail}")
+            print(
+                "[HINT] In PowerShell, set "
+                "$env:QT_PLUGIN_PATH=\"$env:CONDA_PREFIX\\Library\\plugins\" and "
+                "$env:QT_QPA_PLATFORM_PLUGIN_PATH=\"$env:CONDA_PREFIX\\Library\\plugins\\platforms\""
+            )
+            return 1
 
     try:
         import torch  # type: ignore
