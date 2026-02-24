@@ -1017,7 +1017,9 @@ def _save_sets(parent):
     try:
         seg_path = per_time_save
         tmp_path = seg_path + ".tmp"
-        np.save(tmp_path, dat)
+        # Use a file handle so numpy does not append a second ".npy" suffix.
+        with open(tmp_path, "wb") as fh:
+            np.save(fh, dat)
         os.replace(tmp_path, seg_path)
         print("GUI_INFO: %d ROIs saved to %s" % (parent.ncells.get(), seg_path))
     except Exception as e:
@@ -1205,7 +1207,9 @@ def _save_sets(parent):
 
             try:
                 tmp_all_path = seg_all_path + ".tmp"
-                np.save(tmp_all_path, all_dat)
+                # Use a file handle so numpy does not append a second ".npy" suffix.
+                with open(tmp_all_path, "wb") as fh:
+                    np.save(fh, all_dat)
                 os.replace(tmp_all_path, seg_all_path)
                 print(
                     f"GUI_INFO: updated timepoint {time_index} in aggregated seg file {seg_all_path}"

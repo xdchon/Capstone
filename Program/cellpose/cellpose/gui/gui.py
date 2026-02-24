@@ -2833,13 +2833,8 @@ class MainW(QMainWindow):
             self.progress.setValue(0)
         else:
             # autosave segmentation (including aggregated time-lapse seg) if enabled
-            # for multi-timepoint runs we always save each timepoint, regardless
-            # of the disableAutosave checkbox, so results aren't lost
             try:
-                if getattr(self, "_segmentation_all_running", False):
-                    io._save_sets(self)
-                else:
-                    io._save_sets_with_check(self)
+                io._save_sets_with_check(self)
             except Exception as e:
                 print(f"ERROR: could not autosave segmentation: {e}")
 

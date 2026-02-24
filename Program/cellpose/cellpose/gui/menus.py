@@ -21,7 +21,8 @@ def mainmenu(parent):
 
     parent.disableAutosave = QAction("Disable autosave _seg.npy file", parent,
                                      checkable=True)
-    parent.disableAutosave.setChecked(False)
+    # Default to manual saves only (Ctrl+S / File -> Save).
+    parent.disableAutosave.setChecked(True)
     file_menu.addAction(parent.disableAutosave)
 
     parent.loadMasks = QAction("Load &masks (*.tif, *.png, *.jpg)", parent)
