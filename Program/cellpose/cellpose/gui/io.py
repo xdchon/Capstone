@@ -5,6 +5,7 @@ import os, gc, re
 import numpy as np
 import cv2
 import fastremap
+import tifffile
 
 from ..io import imread, imread_2D, imread_3D, imsave, outlines_to_text, add_model, remove_model, save_rois
 from ..models import normalize_default, MODEL_DIR, MODEL_LIST_PATH, get_user_models
@@ -188,10 +189,19 @@ def _load_image(parent, filename=None, load_seg=True, load_3D=False):
                             all_dat = np.load(seg_all_path, allow_pickle=True).item()
                             per_time = all_dat.get("per_time", {})
                             if isinstance(per_time, dict):
-                                parent.seg_time_data = per_time
-                                dat_t = per_time.get(t_index)
-                                if dat_t is None and str(t_index) in per_time:
-                                    dat_t = per_time[str(t_index)]
+                                # Merge disk cache with any in-memory cache to avoid dropping
+                                # newly computed, unsaved timepoints.
+                                merged_per_time = {}
+                                if isinstance(per_time, dict):
+                                    merged_per_time.update(per_time)
+                                mem_per_time = getattr(parent, "seg_time_data", None)
+                                if isinstance(mem_per_time, dict):
+                                    merged_per_time.update(mem_per_time)
+                                parent.seg_time_data = merged_per_time
+
+                                dat_t = merged_per_time.get(t_index)
+                                if dat_t is None and str(t_index) in merged_per_time:
+                                    dat_t = merged_per_time[str(t_index)]
                                 if isinstance(dat_t, dict):
                                     masks = dat_t.get("masks", None)
                                     outlines = dat_t.get("outlines", None)
@@ -854,20 +864,369 @@ def _masks_to_gui(parent, masks, outlines=None, colors=None):
         parent.ViewDropDown.setCurrentIndex(0)
 
 
+def _infer_time_index_from_filename(path):
+    """Infer time index from common mask filename patterns."""
+    name = os.path.basename(path)
+    patterns = [
+        r"timepoint_(\d+)",
+        r"_T(\d+)(?:_|\.|$)",
+        r"\bT(\d+)\b",
+    ]
+    for pat in patterns:
+        m = re.search(pat, name, flags=re.IGNORECASE)
+        if m:
+            try:
+                return int(m.group(1))
+            except Exception:
+                continue
+    return None
+
+
+def _as_zyx_mask(arr):
+    """Normalize mask array to ZYX layout."""
+    arr = np.asarray(arr)
+    arr = np.squeeze(arr)
+    if arr.ndim == 2:
+        return arr[np.newaxis, ...]
+    if arr.ndim == 3:
+        return arr
+    raise ValueError(f"expected 2D or 3D mask array, got shape {arr.shape}")
+
+
+def _default_ome_output_from_mask_folder(folder):
+    folder = os.path.normpath(folder)
+    parent_dir = os.path.dirname(folder)
+    name = os.path.basename(folder)
+    if name.endswith("_cp_masks_by_time"):
+        stem = name[:-len("_by_time")]
+    elif name.endswith("_by_time"):
+        stem = name[:-len("_by_time")]
+    else:
+        stem = name + "_combined_masks"
+    return os.path.join(parent_dir, stem + ".ome.tif")
+
+
+def combine_timepoint_masks_folder_to_ome(
+    input_folder, output_path=None, strict_shape=False, compression="zlib"
+):
+    """
+    Combine per-timepoint labeled mask TIFFs into one labeled OME-TIFF (TZYX).
+
+    This function is disk-backed: it assembles a temporary memmap volume, then
+    writes one OME-TIFF, so peak RAM stays low even for large time-lapse stacks.
+    """
+    folder = os.path.abspath(os.path.expanduser(str(input_folder)))
+    if not os.path.isdir(folder):
+        raise ValueError(f"input folder does not exist: {folder}")
+
+    files = [
+        os.path.join(folder, f)
+        for f in os.listdir(folder)
+        if os.path.isfile(os.path.join(folder, f))
+        and f.lower().endswith((".tif", ".tiff"))
+    ]
+    files = sorted(files)
+    if len(files) == 0:
+        raise ValueError(f"no TIFF files found in folder: {folder}")
+
+    indexed = []
+    for p in files:
+        indexed.append((_infer_time_index_from_filename(p), p))
+
+    has_explicit_t = any(t is not None for t, _ in indexed)
+    if has_explicit_t:
+        used = set()
+        normalized = []
+        next_t = 0
+        for t, p in indexed:
+            if t is None:
+                while next_t in used:
+                    next_t += 1
+                t_use = next_t
+                used.add(t_use)
+                next_t += 1
+            else:
+                t_use = int(t)
+                used.add(t_use)
+            normalized.append((t_use, p))
+    else:
+        normalized = [(i, p) for i, (_t, p) in enumerate(indexed)]
+    normalized.sort(key=lambda x: x[0])
+
+    nt = max(t for t, _ in normalized) + 1
+    target_shape = None
+    max_label = 0
+    for t, p in normalized:
+        arr = _as_zyx_mask(tifffile.imread(p))
+        if target_shape is None:
+            target_shape = tuple(arr.shape)
+        elif strict_shape and tuple(arr.shape) != target_shape:
+            raise ValueError(
+                f"shape mismatch for T={t}: expected {target_shape}, got {arr.shape} in {p}"
+            )
+        if arr.size > 0:
+            try:
+                max_label = max(max_label, int(arr.max()))
+            except Exception:
+                pass
+
+    if target_shape is None:
+        raise ValueError("no readable mask TIFFs found")
+
+    out_dtype = np.uint16 if max_label < 2**16 else np.uint32
+    if output_path is None or str(output_path).strip() == "":
+        output_path = _default_ome_output_from_mask_folder(folder)
+    output_path = os.path.abspath(os.path.expanduser(str(output_path)))
+    out_dir = os.path.dirname(output_path)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+
+    tmp_stack_path = output_path + ".stack.tmp"
+    try:
+        stack = np.memmap(
+            tmp_stack_path,
+            mode="w+",
+            dtype=out_dtype,
+            shape=(nt, target_shape[0], target_shape[1], target_shape[2]),
+        )
+        stack[:] = 0
+
+        for t, p in normalized:
+            arr = _as_zyx_mask(tifffile.imread(p))
+            if tuple(arr.shape) != target_shape:
+                arr_fit = np.zeros(target_shape, dtype=out_dtype)
+                z_min = min(target_shape[0], arr.shape[0])
+                y_min = min(target_shape[1], arr.shape[1])
+                x_min = min(target_shape[2], arr.shape[2])
+                arr_fit[:z_min, :y_min, :x_min] = arr[:z_min, :y_min, :x_min].astype(
+                    out_dtype, copy=False
+                )
+                arr = arr_fit
+            else:
+                arr = arr.astype(out_dtype, copy=False)
+            stack[t, :, :, :] = arr
+            if t % 10 == 0:
+                print(f"GUI_INFO: packed T={t}")
+
+        stack.flush()
+        del stack
+
+        stack_ro = np.memmap(
+            tmp_stack_path,
+            mode="r",
+            dtype=out_dtype,
+            shape=(nt, target_shape[0], target_shape[1], target_shape[2]),
+        )
+        total_bytes = (
+            int(nt)
+            * int(target_shape[0])
+            * int(target_shape[1])
+            * int(target_shape[2])
+            * np.dtype(out_dtype).itemsize
+        )
+        bigtiff = total_bytes >= 3_500_000_000
+        tifffile.imwrite(
+            output_path,
+            stack_ro,
+            compression=compression,
+            metadata={"axes": "TZYX"},
+            bigtiff=bigtiff,
+        )
+        del stack_ro
+    finally:
+        try:
+            if os.path.isfile(tmp_stack_path):
+                os.remove(tmp_stack_path)
+        except Exception:
+            pass
+
+    return output_path, nt, target_shape, out_dtype
+
+
+def _build_ome_from_timepoint_masks(parent):
+    """GUI action: pick a folder of per-timepoint mask TIFFs and build one OME-TIFF."""
+    if not GUI:
+        print("ERROR: GUI not available for folder selection")
+        return
+    start_dir = os.path.dirname(parent.filename) if hasattr(parent, "filename") else os.getcwd()
+    folder = QFileDialog.getExistingDirectory(
+        parent, "Select folder containing timepoint mask TIFFs", start_dir
+    )
+    if not folder:
+        return
+
+    default_out = _default_ome_output_from_mask_folder(folder)
+    out_name = QFileDialog.getSaveFileName(
+        parent,
+        "Save combined OME-TIFF",
+        default_out,
+        "OME-TIFF (*.ome.tif *.ome.tiff);;TIFF (*.tif *.tiff)",
+    )
+    output_path = out_name[0]
+    if output_path == "":
+        return
+
+    try:
+        out_path, nt, shape, out_dtype = combine_timepoint_masks_folder_to_ome(
+            folder, output_path=output_path, strict_shape=False, compression="zlib"
+        )
+        print(
+            f"GUI_INFO: wrote combined labeled OME-TIFF {out_path} "
+            f"shape=(T={nt}, Z={shape[0]}, Y={shape[1]}, X={shape[2]}) dtype={np.dtype(out_dtype).name}"
+        )
+    except Exception as e:
+        print(f"ERROR: failed to build OME-TIFF from folder {folder}: {e}")
+
+
 def _save_png(parent):
-    """ save masks to png or tiff (if 3D) """
+    """save masks to png/tiff and, for time-lapse data, optionally one labeled OME-TIFF."""
     filename = parent.filename
     base = os.path.splitext(filename)[0]
+
+    def _label_dtype(arr):
+        try:
+            max_label = int(np.asarray(arr).max()) if np.asarray(arr).size else 0
+        except Exception:
+            max_label = 0
+        return np.uint16 if max_label < 2**16 else np.uint32
+
     if parent.NZ == 1:
         if parent.cellpix[0].max() > 65534:
             print("GUI_INFO: saving 2D masks to tif (too many masks for PNG)")
-            imsave(base + "_cp_masks.tif", parent.cellpix[0])
+            labels_2d = np.asarray(parent.cellpix[0], dtype=_label_dtype(parent.cellpix[0]))
+            tifffile.imwrite(
+                base + "_cp_masks.tif",
+                labels_2d,
+                compression="zlib",
+                metadata={"axes": "YX"},
+            )
+            print(
+                f"GUI_INFO: saved labeled mask TIFF dtype={labels_2d.dtype} max={int(labels_2d.max())}"
+            )
         else:
             print("GUI_INFO: saving 2D masks to png")
             imsave(base + "_cp_masks.png", parent.cellpix[0].astype(np.uint16))
     else:
         print("GUI_INFO: saving 3D masks to tiff")
-        imsave(base + "_cp_masks.tif", parent.cellpix)
+        labels_zyx = np.asarray(parent.cellpix, dtype=_label_dtype(parent.cellpix))
+        tifffile.imwrite(
+            base + "_cp_masks.tif",
+            labels_zyx,
+            compression="zlib",
+            metadata={"axes": "ZYX"},
+        )
+        print(
+            f"GUI_INFO: saved labeled mask TIFF dtype={labels_zyx.dtype} max={int(labels_zyx.max())}"
+        )
+
+    # For time-lapse segmentation cached in memory, also export one labeled OME-TIFF (TZYX).
+    per_time = getattr(parent, "seg_time_data", None)
+    if not (
+        getattr(parent, "has_time", False)
+        and isinstance(per_time, dict)
+        and len(per_time) > 0
+    ):
+        return
+
+    def _time_index_from_entry(key, value):
+        if isinstance(value, dict):
+            t_val = value.get("time_index", None)
+            if t_val is not None:
+                try:
+                    return int(t_val)
+                except Exception:
+                    pass
+        try:
+            return int(key)
+        except Exception:
+            return None
+
+    nz = int(getattr(parent, "NZ", 1))
+    Ly = int(getattr(parent, "Ly0", getattr(parent, "Ly", 0)))
+    Lx = int(getattr(parent, "Lx0", getattr(parent, "Lx", 0)))
+    if nz <= 0 or Ly <= 0 or Lx <= 0:
+        print("ERROR: invalid image dimensions, cannot save time-lapse OME-TIFF labels")
+        return
+
+    entries = []
+    max_label = 0
+    for key, dat_t in per_time.items():
+        if not isinstance(dat_t, dict):
+            continue
+        masks_t = dat_t.get("masks", None)
+        if masks_t is None:
+            continue
+        t = _time_index_from_entry(key, dat_t)
+        if t is None or t < 0:
+            continue
+        arr = np.asarray(masks_t)
+        if arr.ndim not in (2, 3):
+            continue
+        if arr.size > 0:
+            try:
+                max_label = max(max_label, int(arr.max()))
+            except Exception:
+                pass
+        entries.append((t, arr))
+
+    if len(entries) == 0:
+        print("GUI_INFO: no cached per-timepoint masks available for OME-TIFF export")
+        return
+
+    nt_from_parent = 0
+    try:
+        nt_from_parent = int(getattr(parent, "NT", 0))
+    except Exception:
+        nt_from_parent = 0
+    nt = max(nt_from_parent, max(t for t, _ in entries) + 1)
+    label_dtype = np.uint16 if max_label < 2**16 else np.uint32
+
+    def _copy_to_zyx(dst, src):
+        src = np.asarray(src)
+        if src.ndim == 2:
+            y_min = min(dst.shape[1], src.shape[0])
+            x_min = min(dst.shape[2], src.shape[1])
+            dst[0, :y_min, :x_min] = src[:y_min, :x_min].astype(label_dtype, copy=False)
+        elif src.ndim == 3:
+            z_min = min(dst.shape[0], src.shape[0])
+            y_min = min(dst.shape[1], src.shape[1])
+            x_min = min(dst.shape[2], src.shape[2])
+            dst[:z_min, :y_min, :x_min] = src[:z_min, :y_min, :x_min].astype(
+                label_dtype, copy=False
+            )
+
+    total_bytes = nt * nz * Ly * Lx * np.dtype(label_dtype).itemsize
+    if total_bytes > 1_500_000_000:
+        # fallback for very large volumes: save one labeled TIFF per timepoint
+        fallback_dir = base + "_cp_masks_by_time"
+        os.makedirs(fallback_dir, exist_ok=True)
+        for t, arr in entries:
+            vol = np.zeros((nz, Ly, Lx), dtype=label_dtype)
+            _copy_to_zyx(vol, arr)
+            tifffile.imwrite(
+                os.path.join(fallback_dir, f"masks_T{t:04d}_ZYX.tif"),
+                vol,
+                compression="zlib",
+            )
+        print(
+            "GUI_WARNING: time-lapse OME-TIFF would be too large; saved per-timepoint "
+            f"labeled TIFFs in {fallback_dir}"
+        )
+        return
+
+    labels_tzyx = np.zeros((nt, nz, Ly, Lx), dtype=label_dtype)
+    for t, arr in entries:
+        if 0 <= t < nt:
+            _copy_to_zyx(labels_tzyx[t], arr)
+
+    ome_path = base + "_cp_masks.ome.tif"
+    tifffile.imwrite(
+        ome_path,
+        labels_tzyx,
+        compression="zlib",
+        metadata={"axes": "TZYX"},
+    )
+    print(f"GUI_INFO: saved time-lapse labeled masks to {ome_path}")
 
 
 def _save_flows(parent):
@@ -889,12 +1248,32 @@ def _save_flows(parent):
 def _save_rois(parent):
     """ save masks as rois in .zip file for ImageJ """
     filename = parent.filename
+    base = os.path.splitext(filename)[0]
     if parent.NZ == 1:
         print(
             f"GUI_INFO: saving {parent.cellpix[0].max()} ImageJ ROIs to .zip archive.")
         save_rois(parent.cellpix[0], parent.filename)
     else:
-        print("ERROR: cannot save 3D outlines")
+        # For 3D stacks, write one ROI zip per Z plane.
+        nz = int(parent.cellpix.shape[0]) if hasattr(parent, "cellpix") else int(parent.NZ)
+        n_saved = 0
+        for z in range(nz):
+            masks_z = np.asarray(parent.cellpix[z])
+            if masks_z.size == 0 or int(masks_z.max()) <= 0:
+                continue
+            out_name = f"{base}_Z{z:04d}.tif"
+            try:
+                save_rois(masks_z, out_name, prefix=f"Z{z:04d}_")
+                n_saved += 1
+            except Exception as e:
+                print(f"ERROR: could not save ROI zip for Z={z}: {e}")
+        if n_saved == 0:
+            print("GUI_INFO: no non-empty masks found; no ROI zip files were created")
+        else:
+            print(
+                f"GUI_INFO: saved ImageJ ROI zip files for {n_saved} Z-planes "
+                f"(files named like {os.path.basename(base)}_Z0000_rois.zip)"
+            )
 
 
 def _save_outlines(parent):
@@ -907,7 +1286,29 @@ def _save_outlines(parent):
         outlines = outlines_list(parent.cellpix[0])
         outlines_to_text(base, outlines)
     else:
-        print("ERROR: cannot save 3D outlines")
+        # For 3D stacks, write one outlines text file per Z plane.
+        out_dir = base + "_cp_outlines_by_z"
+        os.makedirs(out_dir, exist_ok=True)
+        nz = int(parent.cellpix.shape[0]) if hasattr(parent, "cellpix") else int(parent.NZ)
+        n_saved = 0
+        for z in range(nz):
+            masks_z = np.asarray(parent.cellpix[z])
+            if masks_z.size == 0 or int(masks_z.max()) <= 0:
+                continue
+            outlines = outlines_list(masks_z)
+            if outlines is None or len(outlines) == 0:
+                continue
+            out_base = os.path.join(
+                out_dir, f"{os.path.basename(base)}_Z{z:04d}"
+            )
+            outlines_to_text(out_base, outlines)
+            n_saved += 1
+        if n_saved == 0:
+            print("GUI_INFO: no non-empty outlines found; no outline text files were created")
+        else:
+            print(
+                f"GUI_INFO: saved outlines text files for {n_saved} Z-planes in {out_dir}"
+            )
 
 
 def _save_sets_with_check(parent):

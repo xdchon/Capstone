@@ -849,8 +849,7 @@ class MainW(QMainWindow):
         self.ModelButtonC.setFont(self.medfont)
         self.ModelButtonC.setFixedWidth(35)
         # run custom model segmentation asynchronously for responsiveness
-        self.ModelButtonC.clicked.connect(
-            lambda: self.start_segmentation_async(custom=True))
+        self.ModelButtonC.clicked.connect(self.run_custom_segmentation)
         self.modelBoxG.addWidget(self.ModelButtonC, widget_row, 8, 1, 1)
         self.ModelButtonC.setEnabled(False)
 
@@ -1029,12 +1028,21 @@ class MainW(QMainWindow):
                             all_dat = np.load(seg_all_path, allow_pickle=True).item()
                             per_time = all_dat.get("per_time", {})
                             if isinstance(per_time, dict):
-                                self.seg_time_data = per_time
-                                dat_t = per_time.get(t_index)
-                                if dat_t is None and str(t_index) in per_time:
-                                    dat_t = per_time[str(t_index)]
-                                if (dat_t is None or not isinstance(dat_t, dict)) and len(per_time) > 0:
-                                    for _k, _v in per_time.items():
+                                # Merge disk cache with in-memory cache instead of replacing it.
+                                # This preserves freshly computed, not-yet-saved timepoints.
+                                merged_per_time = {}
+                                if isinstance(per_time, dict):
+                                    merged_per_time.update(per_time)
+                                mem_per_time = getattr(self, "seg_time_data", None)
+                                if isinstance(mem_per_time, dict):
+                                    merged_per_time.update(mem_per_time)
+                                self.seg_time_data = merged_per_time
+
+                                dat_t = merged_per_time.get(t_index)
+                                if dat_t is None and str(t_index) in merged_per_time:
+                                    dat_t = merged_per_time[str(t_index)]
+                                if (dat_t is None or not isinstance(dat_t, dict)) and len(merged_per_time) > 0:
+                                    for _k, _v in merged_per_time.items():
                                         try:
                                             if isinstance(_v, dict) and int(_v.get("time_index", -1)) == t_index:
                                                 dat_t = _v
@@ -1490,6 +1498,8 @@ class MainW(QMainWindow):
         self.filename = []
         self.loaded = False
         self.recompute_masks = False
+        self.seg_time_data = None
+        self._current_seg_time_index = None
 
         self.deleting_multiple = False
         self.removing_cells_list = []
@@ -2477,6 +2487,42 @@ class MainW(QMainWindow):
             self.show()
 
 
+    def run_custom_segmentation(self):
+        """Run custom-model segmentation, optionally across all timepoints."""
+        if hasattr(self, "segmentation_settings") and getattr(
+            self.segmentation_settings, "segment_all_timepoints", False
+        ):
+            self.compute_segmentation_all_timepoints(custom=True)
+        else:
+            seg_T = None
+            if getattr(self, "has_time", False) and hasattr(self, "currentT"):
+                try:
+                    seg_T = int(self.currentT)
+                except Exception:
+                    seg_T = None
+            self.start_segmentation_async(custom=True, time_index=seg_T)
+
+
+    def _cache_segmentation_result(self, masks, time_index):
+        """Cache per-timepoint segmentation in memory for live browsing and export."""
+        if time_index is None:
+            return
+        try:
+            t = int(time_index)
+            if not isinstance(self.seg_time_data, dict):
+                self.seg_time_data = {}
+            masks_arr = np.asarray(masks)
+            self.seg_time_data[t] = {
+                "masks": masks_arr.copy(),
+                "outlines": None,
+                "colors": None,
+                "time_index": t,
+                "axes": "ZYX" if masks_arr.ndim == 3 else "YX",
+            }
+        except Exception as e:
+            print(f"ERROR: could not cache segmentation for T={time_index}: {e}")
+
+
     def compute_segmentation_all_timepoints(self, custom=False):
         """Run segmentation for every timepoint in a 5D stack.
 
@@ -2514,10 +2560,16 @@ class MainW(QMainWindow):
             return
 
         if len(self._seg_all_queue) == 0:
-            # finished all timepoints; do not change the user's current T,
-            # just mark the multi-timepoint run as complete
+            # finished all timepoints; mark complete and restore the timepoint
+            # the user was on when the run started
             self._segmentation_all_running = False
             self._segmentation_running = False
+            try:
+                t_restore = int(getattr(self, "_seg_all_original_T", 0))
+                if getattr(self, "has_time", False) and int(getattr(self, "NT", 1)) > 1:
+                    self.set_time_index(t_restore)
+            except Exception as e:
+                print(f"ERROR: could not restore original timepoint after all-time run: {e}")
             return
 
         # get next timepoint to process (without changing the user's current view)
@@ -2538,19 +2590,29 @@ class MainW(QMainWindow):
     def _prepare_segmentation_inputs(self, custom=False, model_name=None, load_model=True, time_index=None):
         """Prepare data and parameters for segmentation (shared by sync/async paths)."""
         tic = time.time()
-        self.clear_all()
-        self.flows = [[], [], []]
-        if load_model:
-            self.initialize_model(model_name=model_name, custom=custom)
-        self.progress.setValue(10)
-
-        # determine which time index this segmentation run is for
+        # Determine target timepoint first so we can avoid clearing the visible layer
+        # when segmenting a different timepoint in the background.
         seg_T = time_index
         if seg_T is None and getattr(self, "has_time", False) and hasattr(self, "currentT"):
             try:
                 seg_T = int(self.currentT)
             except Exception:
                 seg_T = None
+
+        should_clear_view = True
+        if seg_T is not None:
+            try:
+                should_clear_view = int(getattr(self, "currentT", 0)) == int(seg_T)
+            except Exception:
+                should_clear_view = True
+        if should_clear_view:
+            self.clear_all()
+            self.flows = [[], [], []]
+
+        if load_model:
+            self.initialize_model(model_name=model_name, custom=custom)
+        self.progress.setValue(10)
+
         # store segmentation time index on the object so saving is independent
         # from GUI slider changes during the run
         self._current_seg_time_index = seg_T
@@ -2836,18 +2898,32 @@ class MainW(QMainWindow):
             else:
                 self.logger.info("%d cells found with model" % n_cells)
 
-            # Display masks only if the user is currently viewing the same timepoint.
-            # This keeps the GUI free for browsing while segmentation runs in the background.
             seg_time_index = result.get("time_index", None)
+            self._cache_segmentation_result(masks, seg_time_index)
+
             try:
                 current_T = int(getattr(self, "currentT", 0))
             except Exception:
                 current_T = None
-            if seg_time_index is None or current_T == seg_time_index:
+
+            autosave_enabled = (
+                hasattr(self, "disableAutosave")
+                and not self.disableAutosave.isChecked()
+            )
+            should_switch_view = (
+                seg_time_index is not None
+                and (self._segmentation_all_running or autosave_enabled)
+                and current_T != seg_time_index
+            )
+
+            if should_switch_view:
+                self.set_time_index(seg_time_index)
+            elif seg_time_index is None or current_T == seg_time_index:
                 io._masks_to_gui(self, masks, outlines=None)
                 self.masksOn = True
                 if hasattr(self, "MCheckBox"):
                     self.MCheckBox.setChecked(True)
+
             self.progress.setValue(100)
             self.recompute_masks = recompute_masks
             if (

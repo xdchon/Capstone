@@ -48,6 +48,15 @@ def mainmenu(parent):
     file_menu.addAction(parent.savePNG)
     parent.savePNG.setEnabled(False)
 
+    parent.buildOmeFromMasks = QAction(
+        "Build OME-TIFF from timepoint mask folder", parent
+    )
+    parent.buildOmeFromMasks.triggered.connect(
+        lambda: io._build_ome_from_timepoint_masks(parent)
+    )
+    file_menu.addAction(parent.buildOmeFromMasks)
+    parent.buildOmeFromMasks.setEnabled(True)
+
     parent.saveOutlines = QAction("Save &Outlines as text for imageJ", parent)
     parent.saveOutlines.setShortcut("Ctrl+O")
     parent.saveOutlines.triggered.connect(lambda: io._save_outlines(parent))
