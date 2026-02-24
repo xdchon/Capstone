@@ -554,6 +554,7 @@ class MainW(QMainWindow):
         d = datetime.datetime.now()
         self.training_params = {
             "model_index": 0,
+            "initial_model": "cpsam",
             "learning_rate": 1e-5,
             "weight_decay": 0.1,
             "n_epochs": 100,
@@ -2362,7 +2363,13 @@ class MainW(QMainWindow):
         image_names = self.get_files()[0]
         self.train_data, self.train_labels, self.train_files, restore, normalize_params = io._get_train_set(
             image_names)
-        TW = guiparts.TrainWindow(self, models.MODEL_NAMES)
+        train_model_choices = []
+        for name in list(models.MODEL_NAMES) + list(self.model_strings):
+            if isinstance(name, str) and len(name) > 0 and name not in train_model_choices:
+                train_model_choices.append(name)
+        if len(train_model_choices) == 0:
+            train_model_choices = ["cpsam"]
+        TW = guiparts.TrainWindow(self, train_model_choices)
         train = TW.exec_()
         if train:
             self.logger.info(
@@ -2375,12 +2382,33 @@ class MainW(QMainWindow):
         from cellpose.models import normalize_default
         if normalize_params is None:
             normalize_params = copy.deepcopy(normalize_default)
-        model_type = models.MODEL_NAMES[self.training_params["model_index"]]
-        self.logger.info(f"training new model starting at model {model_type}")
-        self.current_model = model_type
-        
+
+        train_model_choices = []
+        for name in list(models.MODEL_NAMES) + list(self.model_strings):
+            if isinstance(name, str) and len(name) > 0 and name not in train_model_choices:
+                train_model_choices.append(name)
+        if len(train_model_choices) == 0:
+            train_model_choices = ["cpsam"]
+
+        initial_model = self.training_params.get("initial_model", None)
+        if not isinstance(initial_model, str) or len(initial_model) == 0:
+            try:
+                model_index = int(self.training_params.get("model_index", 0))
+            except Exception:
+                model_index = 0
+            if model_index < 0 or model_index >= len(train_model_choices):
+                model_index = 0
+            initial_model = train_model_choices[model_index]
+        if initial_model not in train_model_choices and not os.path.exists(initial_model):
+            self.logger.warning(
+                f"initial model {initial_model} not found; falling back to cpsam")
+            initial_model = "cpsam"
+
+        self.logger.info(f"training new model starting at model {initial_model}")
+        self.current_model = initial_model
+
         self.model = models.CellposeModel(gpu=self.useGPU.isChecked(),
-                                          model_type=model_type)
+                                          pretrained_model=initial_model)
         save_path = os.path.dirname(self.filename)
 
         print("GUI_INFO: name of new model: " + self.training_params["model_name"])

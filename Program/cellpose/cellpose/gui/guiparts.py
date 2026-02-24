@@ -497,10 +497,21 @@ class TrainWindow(QDialog):
 
         # choose initial model
         yoff += 1
+        self.model_strings = list(model_strings) if len(model_strings) > 0 else ["cpsam"]
         self.ModelChoose = QComboBox()
-        self.ModelChoose.addItems(model_strings)
-        self.ModelChoose.setFixedWidth(150)
-        self.ModelChoose.setCurrentIndex(parent.training_params["model_index"])
+        self.ModelChoose.addItems(self.model_strings)
+        self.ModelChoose.setFixedWidth(220)
+        initial_model = parent.training_params.get("initial_model", None)
+        if isinstance(initial_model, str) and initial_model in self.model_strings:
+            initial_index = self.model_strings.index(initial_model)
+        else:
+            try:
+                initial_index = int(parent.training_params.get("model_index", 0))
+            except Exception:
+                initial_index = 0
+            if initial_index < 0 or initial_index >= len(self.model_strings):
+                initial_index = 0
+        self.ModelChoose.setCurrentIndex(initial_index)
         self.l0.addWidget(self.ModelChoose, yoff, 1, 1, 1)
         qlabel = QLabel("initial model: ")
         qlabel.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
@@ -566,6 +577,7 @@ class TrainWindow(QDialog):
         # set training params
         parent.training_params = {
             "model_index": self.ModelChoose.currentIndex(),
+            "initial_model": self.ModelChoose.currentText(),
             "learning_rate": float(self.edits[0].text()),
             "weight_decay": float(self.edits[1].text()),
             "n_epochs": int(self.edits[2].text()),
