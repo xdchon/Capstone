@@ -1,64 +1,125 @@
-# Install On Another Computer (Conda)
+# Install On Another Windows Computer (Conda)
 
-This repo has a local `cellpose` fork, so installation must use the local source code, not PyPI `cellpose`.
+This project uses a local `cellpose` fork in `Program/cellpose`, so install from local source, not from PyPI.
 
-## Why your old env file failed
+## 0) Preflight on the source computer
 
-`Program/cellpose_env.yml` previously contained a machine-specific export:
-- Windows build-string pins
-- `python=3.14`
-- local dev version pin (`cellpose==...dev...`)
-- CUDA-specific torch wheel pin
+Before you move to a second computer, verify what is actually tracked vs local-only:
 
-That combination is not portable and often fails to solve/install on a second machine.
+- Tracked and expected in a normal clone:
+  - `Program/cellpose`
+  - `Program/SBReadFile22-Python-main`
+  - `Program/cellpose_env.yml`
+  - `Program/check_install.py`
+  - `Program/setup_windows_qt_env.ps1`
+- Local-only by `.gitignore` (not present after a normal clone):
+  - `Program/NLI_DB`
+  - `Program/*_env` (for example `Program/cellpose_env`, `Program/matlab_env`)
+- Currently untracked local script:
+  - `Program/SBReadFile22-Python-main/segment_timepoint_tiffs_cpsam.py`
 
-You also hit two independent Windows-specific issues:
-- Editable install error from `setuptools-scm` when `Program/cellpose` has no usable git metadata in the copied folder.
-- Qt runtime plugin resolution error (`qwindows.dll`) where Qt imports succeed but GUI startup fails with:
-  `Could not find the Qt platform plugin "windows" in ""`.
+If you need any local-only files on the new PC, either commit them or copy them manually.
 
-## Clean install steps
+Important security note:
+- `Program/NLI_DB/openai_api_key.txt` should not be transferred as-is.
+- Prefer setting `OPENAI_API_KEY` on the new machine instead.
 
-Run these commands from the repository root (the folder that contains `Program/`):
+Important size note:
+- The `Images/` tree can be very large. Copy only the test data you need for validation.
 
-```bash
+## 1) Base install on target Windows PC (PowerShell)
+
+Open **Anaconda Prompt** or **PowerShell with conda available**, then run from repository root:
+
+```powershell
 conda env remove -n cellpose-local -y
-conda env create -f Program/cellpose_env.yml
+conda env create -f Program\cellpose_env.yml
 conda activate cellpose-local
+
 python -m pip install --upgrade pip setuptools wheel
-python -m pip install -e ./Program/cellpose
+python -m pip install -e .\Program\cellpose
+
 conda install -n cellpose-local -c conda-forge pyqt=6 qtpy pyqtgraph superqt qtbase -y
+
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 .\Program\setup_windows_qt_env.ps1 -PersistForCondaEnv
 ```
 
-## Optional GPU torch install
+## 2) Optional GPU torch install
 
-If you want GPU acceleration, replace torch/torchvision after the above install:
+If you want GPU acceleration, replace torch after base install:
 
-```bash
+```powershell
 python -m pip uninstall -y torch torchvision
 python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
 ```
 
 Use the CUDA index URL that matches your NVIDIA driver/toolkit.
 
-## Verify install
+## 3) Verify install
 
-```bash
-python Program/check_install.py
+Run these checks in the activated `cellpose-local` env:
+
+```powershell
+python Program\check_install.py
 python -m cellpose --version
-python Program/SBReadFile22-Python-main/segment_5d_cellpose.py --help
+python Program\SBReadFile22-Python-main\segment_5d_cellpose.py --help
+python Program\SBReadFile22-Python-main\seg_to_tif.py --help
 ```
 
-If `check_install.py` reports missing Qt Windows plugin, rerun:
+Expected outcomes:
+- `check_install.py` prints `All required checks passed.`
+- `cellpose` import path points into this repo (`Program/cellpose/...`).
+- CLI `--help` commands print usage text without import errors.
+
+## 4) Run commands
+
+Cellpose GUI:
+
+```powershell
+python -m cellpose
+```
+
+SlideBook 5D segmentation:
+
+```powershell
+python Program\SBReadFile22-Python-main\segment_5d_cellpose.py --slide C:\path\to\file.sldyz --capture 0 --position 0 --all-time --mode auto --save-ome-tiff
+```
+
+## 5) Optional components
+
+### NLI database tools (`Program/NLI_DB`)
+
+This folder is local-only by default (`.gitignore`), so copy it manually if needed.
+
+Install extra packages:
+
+```powershell
+python -m pip install openai streamlit pandas
+```
+
+Run:
+
+```powershell
+python Program\NLI_DB\nli_cli.py
+python Program\NLI_DB\nli_gui.py
+streamlit run Program\NLI_DB\nli_streamlit.py
+```
+
+### MATLAB bridge (`SldyToMATLAB.py`)
+
+`Program/SBReadFile22-Python-main/SldyToMATLAB.py` additionally requires MATLAB Engine for Python in the active environment and a shared MATLAB session.
+
+## 6) Common fixes
+
+If Qt plugin errors appear (`qwindows.dll` not found):
 
 ```powershell
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 .\Program\setup_windows_qt_env.ps1 -PersistForCondaEnv
 ```
 
-If it still fails and says `qwindows.dll` is missing, your environment has Qt Python packages but not the Windows platform plugin binaries. Repair by reinstalling one coherent Qt stack:
+If still failing, reinstall one coherent Qt stack:
 
 ```powershell
 conda install -n cellpose-local -c conda-forge pyqt=6 qtpy pyqtgraph superqt qtbase -y
@@ -66,32 +127,10 @@ conda install -n cellpose-local -c conda-forge pyqt=6 qtpy pyqtgraph superqt qtb
 python -m pip install --force-reinstall PyQt6 PyQt6-Qt6 qtpy pyqtgraph superqt
 ```
 
-## Launch commands
-
-Cellpose GUI:
-
-```bash
-python -m cellpose
-```
-
-SlideBook 5D segmentation CLI:
-
-```bash
-python Program/SBReadFile22-Python-main/segment_5d_cellpose.py --slide /path/to/file.sldyz --capture 0 --position 0 --all-time --mode auto --save-ome-tiff
-```
-
-## Common checks if something still fails
-
-```bash
-python -c "import cellpose; print(cellpose.__file__)"
-```
-
-Path should point into this repo (`Program/cellpose/...`), not a global site-packages copy.
-
-If editable install fails with `setuptools-scm was unable to detect version`, your copy is missing git metadata for `Program/cellpose`. Use:
+If editable install fails with `setuptools-scm was unable to detect version`:
 
 ```powershell
 $env:SETUPTOOLS_SCM_PRETEND_VERSION_FOR_CELLPOSE="4.0.0"
-python -m pip install -e ./Program/cellpose
+python -m pip install -e .\Program\cellpose
 Remove-Item Env:\SETUPTOOLS_SCM_PRETEND_VERSION_FOR_CELLPOSE
 ```

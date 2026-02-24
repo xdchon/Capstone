@@ -31,7 +31,15 @@ REQUIRED_IMPORTS = [
 def check_import(module_name: str, package_hint: str | None) -> tuple[bool, str]:
     try:
         module = importlib.import_module(module_name)
-        origin = getattr(module, "__file__", "<built-in>")
+        origin = getattr(module, "__file__", None)
+        if module_name == "cellpose" and not origin:
+            return (
+                False,
+                "cellpose resolved as a namespace package without __file__ "
+                "(install local fork with: python -m pip install -e ./Program/cellpose)",
+            )
+        if origin is None:
+            origin = "<built-in>"
         return True, str(origin)
     except Exception as exc:  # pragma: no cover - diagnostics path
         hint = package_hint or module_name
@@ -140,10 +148,17 @@ def main() -> int:
     try:
         import cellpose  # type: ignore
 
-        resolved = Path(cellpose.__file__).resolve()
-        print(f"[INFO] cellpose import path: {resolved}")
-        if "Program/cellpose/cellpose" not in str(resolved).replace("\\", "/"):
-            print("[WARN] cellpose is not being imported from this repo's local fork.")
+        cellpose_file = getattr(cellpose, "__file__", None)
+        if cellpose_file:
+            resolved = Path(cellpose_file).resolve()
+            print(f"[INFO] cellpose import path: {resolved}")
+            if "Program/cellpose/cellpose" not in str(resolved).replace("\\", "/"):
+                print("[WARN] cellpose is not being imported from this repo's local fork.")
+        else:
+            print(
+                "[WARN] cellpose import did not resolve to a concrete file path "
+                "(namespace package)."
+            )
     except Exception:
         pass
 
