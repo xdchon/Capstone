@@ -1100,6 +1100,11 @@ class MainW(QMainWindow):
                         if masks is not None:
                             io._masks_to_gui(self, masks, outlines=outlines, colors=colors)
                             seg_loaded = True
+                # final fallback: by-timepoint TIFF folder (e.g. *_cp_masks_by_time)
+                if not seg_loaded:
+                    seg_loaded = io._load_timepoint_mask_from_by_time(
+                        self, base, t_index
+                    )
             except Exception as e:
                 print(f"ERROR: could not auto-load seg for T={self.currentT}: {e}")
             if not seg_loaded and hasattr(self, "cellpix") and hasattr(self, "NZ") and self.NZ is not None:
@@ -1500,6 +1505,11 @@ class MainW(QMainWindow):
         self.recompute_masks = False
         self.seg_time_data = None
         self._current_seg_time_index = None
+        self._time_mask_base = None
+        self._time_mask_folder = None
+        self._time_mask_folder_mtime = None
+        self._time_mask_file_map = None
+        self.available_mask_timepoints = []
 
         self.deleting_multiple = False
         self.removing_cells_list = []

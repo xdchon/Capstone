@@ -255,6 +255,12 @@ def _load_image(parent, filename=None, load_seg=True, load_3D=False):
                             if masks is not None:
                                 _masks_to_gui(parent, masks, outlines=outlines, colors=colors)
                                 seg_loaded = True
+
+                    # final fallback: by-timepoint TIFF folder (e.g. *_cp_masks_by_time)
+                    if not seg_loaded:
+                        seg_loaded = _load_timepoint_mask_from_by_time(
+                            parent, base, t_index
+                        )
             except Exception as e:
                 print(f"ERROR: could not auto-load seg on initial load: {e}")
 
@@ -906,6 +912,114 @@ def _default_ome_output_from_mask_folder(folder):
     return os.path.join(parent_dir, stem + ".ome.tif")
 
 
+def _collect_timepoint_mask_files(folder):
+    """Collect timepoint mask TIFF files from a folder as {time_index: path}."""
+    files = [
+        os.path.join(folder, f)
+        for f in os.listdir(folder)
+        if os.path.isfile(os.path.join(folder, f))
+        and f.lower().endswith((".tif", ".tiff"))
+    ]
+    files = sorted(files)
+    if len(files) == 0:
+        return {}
+
+    time_map = {}
+    next_seq = 0
+    for p in files:
+        t = _infer_time_index_from_filename(p)
+        if t is None or t in time_map:
+            while next_seq in time_map:
+                next_seq += 1
+            t = next_seq
+            next_seq += 1
+        else:
+            t = int(t)
+        time_map[t] = p
+    return time_map
+
+
+def _get_timepoint_mask_map_for_base(parent, base):
+    """
+    Return (folder, {time_index: tif_path}) for by-time mask folders near `base`.
+    Uses a lightweight folder-mtime cache on the GUI parent.
+    """
+    candidates = [base + "_cp_masks_by_time", base + "_masks_by_time"]
+    folder = next((d for d in candidates if os.path.isdir(d)), None)
+    if folder is None:
+        return None, {}
+
+    try:
+        folder_mtime = os.path.getmtime(folder)
+    except Exception:
+        folder_mtime = None
+
+    cache_base = getattr(parent, "_time_mask_base", None)
+    cache_folder = getattr(parent, "_time_mask_folder", None)
+    cache_mtime = getattr(parent, "_time_mask_folder_mtime", None)
+    cache_map = getattr(parent, "_time_mask_file_map", None)
+
+    if (
+        cache_base == base
+        and cache_folder == folder
+        and isinstance(cache_map, dict)
+        and cache_mtime == folder_mtime
+    ):
+        return folder, cache_map
+
+    time_map = _collect_timepoint_mask_files(folder)
+    parent._time_mask_base = base
+    parent._time_mask_folder = folder
+    parent._time_mask_folder_mtime = folder_mtime
+    parent._time_mask_file_map = time_map
+    try:
+        parent.available_mask_timepoints = sorted(time_map.keys())
+    except Exception:
+        pass
+    if len(time_map) > 0:
+        print(
+            f"GUI_INFO: found {len(time_map)} timepoint mask TIFFs in {folder}"
+        )
+    return folder, time_map
+
+
+def _load_timepoint_mask_from_by_time(parent, base, t_index):
+    """
+    Load masks for a specific timepoint from *_cp_masks_by_time folder if available.
+    Returns True if loaded, else False.
+    """
+    folder, time_map = _get_timepoint_mask_map_for_base(parent, base)
+    if folder is None or len(time_map) == 0:
+        return False
+    try:
+        t = int(t_index)
+    except Exception:
+        return False
+    if t not in time_map:
+        return False
+
+    mask_path = time_map[t]
+    try:
+        masks = _as_zyx_mask(tifffile.imread(mask_path))
+        _masks_to_gui(parent, masks, outlines=None, colors=None)
+        if not isinstance(getattr(parent, "seg_time_data", None), dict):
+            parent.seg_time_data = {}
+        parent.seg_time_data[t] = {
+            "masks": masks.copy(),
+            "outlines": None,
+            "colors": None,
+            "time_index": t,
+            "axes": "ZYX",
+        }
+        print(
+            f"GUI_INFO: loaded timepoint mask T={t} from by-time folder file {os.path.basename(mask_path)}"
+        )
+        return True
+    except Exception as e:
+        print(f"ERROR: could not load by-time mask for T={t} from {mask_path}: {e}")
+        return False
+
+
 def combine_timepoint_masks_folder_to_ome(
     input_folder, output_path=None, strict_shape=False, compression="zlib"
 ):
@@ -1195,22 +1309,28 @@ def _save_png(parent):
                 label_dtype, copy=False
             )
 
+    # Always keep per-timepoint TIFFs for time-lapse masks (useful for .sldy workflows
+    # and as a robust fallback when *_seg.npy is unavailable).
+    fallback_dir = base + "_cp_masks_by_time"
+    os.makedirs(fallback_dir, exist_ok=True)
+    for t, arr in entries:
+        vol = np.zeros((nz, Ly, Lx), dtype=label_dtype)
+        _copy_to_zyx(vol, arr)
+        tifffile.imwrite(
+            os.path.join(fallback_dir, f"masks_T{t:04d}_ZYX.tif"),
+            vol,
+            compression="zlib",
+            metadata={"axes": "ZYX"},
+        )
+    print(
+        f"GUI_INFO: saved {len(entries)} per-timepoint labeled TIFF stacks in {fallback_dir}"
+    )
+
     total_bytes = nt * nz * Ly * Lx * np.dtype(label_dtype).itemsize
     if total_bytes > 1_500_000_000:
-        # fallback for very large volumes: save one labeled TIFF per timepoint
-        fallback_dir = base + "_cp_masks_by_time"
-        os.makedirs(fallback_dir, exist_ok=True)
-        for t, arr in entries:
-            vol = np.zeros((nz, Ly, Lx), dtype=label_dtype)
-            _copy_to_zyx(vol, arr)
-            tifffile.imwrite(
-                os.path.join(fallback_dir, f"masks_T{t:04d}_ZYX.tif"),
-                vol,
-                compression="zlib",
-            )
         print(
-            "GUI_WARNING: time-lapse OME-TIFF would be too large; saved per-timepoint "
-            f"labeled TIFFs in {fallback_dir}"
+            "GUI_WARNING: time-lapse OME-TIFF would be too large; "
+            "kept per-timepoint labeled TIFFs instead"
         )
         return
 
