@@ -418,15 +418,15 @@ class SegmentationSettings(QWidget):
         self.stitch_over_time_cb = QCheckBox("stitch ROI IDs across time (4D)")
         self.stitch_over_time_cb.setFont(font)
         self.stitch_over_time_cb.setToolTip(
-            "when segmenting a timepoint range, link ROIs between consecutive timepoints using IOU.\n"
-            "keeps stable ROI IDs over time (tracking-like labels) instead of independent IDs per timepoint."
+            "when segmenting a timepoint range, keep ROI IDs consistent in 4D (Z + time).\n"
+            "if Z stitching was not enabled in model settings, GUI applies Z stitching first, then links ROIs across adjacent timepoints."
         )
         grid_layout.addWidget(self.stitch_over_time_cb, row, 0, 1, 8)
 
         row += 1
         time_stitch_thresh_label = QLabel("time stitch IOU:")
         time_stitch_thresh_label.setToolTip(
-            "minimum IOU to keep the same ROI ID between adjacent timepoints (0-1)."
+            "minimum IOU for 4D stitching (used for Z stitching, and timepoint-to-timepoint ID linking)."
         )
         time_stitch_thresh_label.setFont(font)
         grid_layout.addWidget(time_stitch_thresh_label, row, 0, 1, 4)
@@ -435,7 +435,7 @@ class SegmentationSettings(QWidget):
         self.time_stitch_threshold_box.setFixedWidth(48)
         self.time_stitch_threshold_box.setFont(font)
         self.time_stitch_threshold_box.setToolTip(
-            "minimum IOU to stitch ROI IDs over time."
+            "minimum IOU for 4D stitching over Z and time."
         )
         grid_layout.addWidget(self.time_stitch_threshold_box, row, 4, 1, 2)
 

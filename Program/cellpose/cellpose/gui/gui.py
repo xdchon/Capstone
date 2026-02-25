@@ -17,7 +17,7 @@ import cv2
 
 from . import guiparts, menus, io
 from .. import models, core, dynamics, metrics, version, train
-from ..utils import download_url_to_file, masks_to_outlines, diameters
+from ..utils import download_url_to_file, masks_to_outlines, diameters, stitch3D
 from ..io import get_image_files, imsave, imread
 from ..transforms import resize_image, normalize99, normalize99_tile, smooth_sharpen_img
 from ..models import normalize_default
@@ -2648,6 +2648,29 @@ class MainW(QMainWindow):
         self._seg_all_time_next_label = next_label
         return stitched
 
+    @staticmethod
+    def _stitch_masks_over_z(masks, stitch_threshold=0.25):
+        """Stitch ROI IDs across adjacent Z planes for one timepoint volume."""
+        arr = np.asarray(masks)
+        if arr.ndim != 3 or arr.shape[0] <= 1:
+            return arr
+        try:
+            th = float(stitch_threshold)
+        except Exception:
+            th = 0.25
+        if th < 0.0:
+            th = 0.0
+        if th > 1.0:
+            th = 1.0
+        arr_i = arr.astype(np.int32, copy=True)
+        stitched = stitch3D(arr_i, stitch_threshold=th)
+        max_label = int(stitched.max()) if stitched.size else 0
+        if max_label < 2**16:
+            return stitched.astype(np.uint16, copy=False)
+        if max_label < 2**32:
+            return stitched.astype(np.uint32, copy=False)
+        return stitched
+
     def _cache_segmentation_result(self, masks, time_index, preserve_labels=False):
         """Cache per-timepoint segmentation in memory for live browsing and export."""
         if time_index is None:
@@ -3100,6 +3123,26 @@ class MainW(QMainWindow):
                 and getattr(self, "_seg_all_time_stitch_enabled", False)
             ):
                 try:
+                    do_3D_result = bool(result.get("do_3D", False))
+                    try:
+                        z_stitch_in_model = float(result.get("stitch_threshold", 0.0))
+                    except Exception:
+                        z_stitch_in_model = 0.0
+                    # 4D mode should preserve IDs across Z and T.
+                    # If model settings did not already stitch Z (do_3D=False and stitch_threshold<=0),
+                    # apply Z stitching here before time stitching.
+                    if (
+                        np.asarray(masks).ndim == 3
+                        and np.asarray(masks).shape[0] > 1
+                        and (not do_3D_result)
+                        and z_stitch_in_model <= 0.0
+                    ):
+                        z_th = float(getattr(self, "_seg_all_time_stitch_threshold", 0.25))
+                        print(
+                            "GUI_INFO: 4D stitch mode -> stitching over Z first "
+                            f"for T={seg_time_index} (IOU={z_th:.3f})"
+                        )
+                        masks = self._stitch_masks_over_z(masks, stitch_threshold=z_th)
                     masks = self._stitch_masks_over_time(masks, seg_time_index)
                     preserve_labels = True
                 except Exception as e:
