@@ -16,7 +16,7 @@ from scipy.stats import mode
 import cv2
 
 from . import guiparts, menus, io
-from .. import models, core, dynamics, version, train
+from .. import models, core, dynamics, metrics, version, train
 from ..utils import download_url_to_file, masks_to_outlines, diameters
 from ..io import get_image_files, imsave, imread
 from ..transforms import resize_image, normalize99, normalize99_tile, smooth_sharpen_img
@@ -533,11 +533,18 @@ class MainW(QMainWindow):
         self._segmentation_worker = None
         self._segmentation_all_running = False
         self._seg_all_queue = []
+        self._seg_all_total = 0
+        self._seg_all_current_t = None
         self._seg_all_original_T = 0
         self._seg_all_custom = False
         self._seg_all_model_name = None
         self._seg_all_first = True
+        self._seg_all_time_stitch_enabled = False
+        self._seg_all_time_stitch_threshold = 0.25
+        self._seg_all_time_prev_masks = None
+        self._seg_all_time_next_label = 1
         self.seg_time_data = None
+        self._current_seg_preserve_labels = False
         self.reset()
 
         # This needs to go after .reset() is called to get state fully set up:
@@ -1017,8 +1024,15 @@ class MainW(QMainWindow):
                         masks = dat_t.get("masks", None)
                         outlines = dat_t.get("outlines", None)
                         colors = dat_t.get("colors", None)
+                        preserve_labels = bool(dat_t.get("preserve_labels", False))
                         if masks is not None:
-                            io._masks_to_gui(self, masks, outlines=outlines, colors=colors)
+                            io._masks_to_gui(
+                                self,
+                                masks,
+                                outlines=outlines,
+                                colors=colors,
+                                preserve_labels=preserve_labels,
+                            )
                             seg_loaded = True
                 # if not cached, try loading aggregated seg file from disk once
                 if not seg_loaded:
@@ -1053,8 +1067,20 @@ class MainW(QMainWindow):
                                     masks = dat_t.get("masks", None)
                                     outlines = dat_t.get("outlines", None)
                                     colors = dat_t.get("colors", None)
+                                    preserve_labels = bool(
+                                        dat_t.get(
+                                            "preserve_labels",
+                                            all_dat.get("stitch_over_time", False),
+                                        )
+                                    )
                                     if masks is not None:
-                                        io._masks_to_gui(self, masks, outlines=outlines, colors=colors)
+                                        io._masks_to_gui(
+                                            self,
+                                            masks,
+                                            outlines=outlines,
+                                            colors=colors,
+                                            preserve_labels=preserve_labels,
+                                        )
                                         seg_loaded = True
 
                             # Fallback: OME-style TZYX arrays at top-level (no per_time mapping)
@@ -1075,10 +1101,19 @@ class MainW(QMainWindow):
                                         if 0 <= t_index < arr_tzyx.shape[0]:
                                             masks_t = arr_tzyx[t_index]
                                             outlines_t = None
+                                            preserve_labels = bool(
+                                                all_dat.get("stitch_over_time", False)
+                                            )
                                             if isinstance(outlines_all, np.ndarray) and outlines_all.shape == masks_all.shape:
                                                 out_arr = np.transpose(outlines_all, order)
                                                 outlines_t = out_arr[t_index]
-                                            io._masks_to_gui(self, masks_t, outlines=outlines_t, colors=None)
+                                            io._masks_to_gui(
+                                                self,
+                                                masks_t,
+                                                outlines=outlines_t,
+                                                colors=None,
+                                                preserve_labels=preserve_labels,
+                                            )
                                             seg_loaded = True
                                     except Exception as ee:
                                         print(f"ERROR: could not interpret OME-style masks in {seg_all_path}: {ee}")
@@ -1097,8 +1132,15 @@ class MainW(QMainWindow):
                         masks = dat.get("masks", None)
                         outlines = dat.get("outlines", None)
                         colors = dat.get("colors", None)
+                        preserve_labels = bool(dat.get("preserve_labels", False))
                         if masks is not None:
-                            io._masks_to_gui(self, masks, outlines=outlines, colors=colors)
+                            io._masks_to_gui(
+                                self,
+                                masks,
+                                outlines=outlines,
+                                colors=colors,
+                                preserve_labels=preserve_labels,
+                            )
                             seg_loaded = True
                 # final fallback: by-timepoint TIFF folder (e.g. *_cp_masks_by_time)
                 if not seg_loaded:
@@ -1505,6 +1547,10 @@ class MainW(QMainWindow):
         self.recompute_masks = False
         self.seg_time_data = None
         self._current_seg_time_index = None
+        self._current_seg_preserve_labels = False
+        self._seg_all_total = 0
+        self._seg_all_current_t = None
+        self._reset_time_stitch_state()
         self._time_mask_base = None
         self._time_mask_folder = None
         self._time_mask_folder_mtime = None
@@ -2493,12 +2539,13 @@ class MainW(QMainWindow):
             if maski.ndim < 3:
                 maski = maski[np.newaxis, ...]
             self.logger.info("%d cells found" % (len(np.unique(maski)[1:])))
-            io._masks_to_gui(self, maski, outlines=None)
+            io._masks_to_gui(self, maski, outlines=None, preserve_labels=False)
+            self._current_seg_preserve_labels = False
             self.show()
 
 
     def run_custom_segmentation(self):
-        """Run custom-model segmentation, optionally across all timepoints."""
+        """Run custom-model segmentation, optionally across a selected timepoint range."""
         if hasattr(self, "segmentation_settings") and getattr(
             self.segmentation_settings, "segment_all_timepoints", False
         ):
@@ -2513,7 +2560,95 @@ class MainW(QMainWindow):
             self.start_segmentation_async(custom=True, time_index=seg_T)
 
 
-    def _cache_segmentation_result(self, masks, time_index):
+    def _reset_time_stitch_state(self):
+        self._seg_all_time_stitch_enabled = False
+        self._seg_all_time_stitch_threshold = 0.25
+        self._seg_all_time_prev_masks = None
+        self._seg_all_time_next_label = 1
+
+    @staticmethod
+    def _compact_positive_labels(labels):
+        """Map any positive label IDs to compact IDs [1..N], preserving background=0."""
+        arr = np.asarray(labels)
+        uniq = np.unique(arr)
+        uniq = uniq[uniq > 0]
+        if uniq.size == 0:
+            return np.zeros(arr.shape, dtype=np.int32), uniq
+
+        flat = arr.reshape(-1)
+        idx = np.searchsorted(uniq, flat)
+        safe_idx = np.clip(idx, 0, uniq.size - 1)
+        valid = (flat > 0) & (idx < uniq.size) & (uniq[safe_idx] == flat)
+        compact_flat = np.zeros(flat.shape[0], dtype=np.int32)
+        compact_flat[valid] = safe_idx[valid] + 1
+        return compact_flat.reshape(arr.shape), uniq
+
+    def _stitch_masks_over_time(self, masks, time_index):
+        """
+        Keep stable ROI IDs across adjacent timepoints by greedy IOU matching.
+        Unmatched current ROIs receive new global IDs.
+        """
+        curr_compact, _ = self._compact_positive_labels(masks)
+        n_curr = int(curr_compact.max()) if curr_compact.size else 0
+        if n_curr == 0:
+            stitched = np.zeros_like(curr_compact, dtype=np.uint16)
+            self._seg_all_time_prev_masks = stitched.copy()
+            return stitched
+
+        curr_to_global = np.zeros(n_curr + 1, dtype=np.int64)
+        prev_masks = getattr(self, "_seg_all_time_prev_masks", None)
+        next_label = int(getattr(self, "_seg_all_time_next_label", 1))
+        threshold = float(getattr(self, "_seg_all_time_stitch_threshold", 0.25))
+
+        if (
+            isinstance(prev_masks, np.ndarray)
+            and prev_masks.size > 0
+            and prev_masks.shape == curr_compact.shape
+        ):
+            prev_compact, prev_global_ids = self._compact_positive_labels(prev_masks)
+            if prev_global_ids.size > 0:
+                iou = metrics._intersection_over_union(curr_compact, prev_compact)[1:, 1:]
+                if iou.size > 0:
+                    pairs = np.argwhere(iou >= threshold)
+                    if pairs.size > 0:
+                        scores = iou[pairs[:, 0], pairs[:, 1]]
+                        order = np.argsort(scores)[::-1]
+                        used_curr = np.zeros(n_curr + 1, dtype=bool)
+                        used_prev = np.zeros(prev_global_ids.size + 1, dtype=bool)
+                        for oi in order:
+                            c_id = int(pairs[oi, 0]) + 1
+                            p_id = int(pairs[oi, 1]) + 1
+                            if used_curr[c_id] or used_prev[p_id]:
+                                continue
+                            curr_to_global[c_id] = int(prev_global_ids[p_id - 1])
+                            used_curr[c_id] = True
+                            used_prev[p_id] = True
+        elif isinstance(prev_masks, np.ndarray) and prev_masks.size > 0:
+            print(
+                "GUI_WARNING: skipping time-stitch for "
+                f"T={time_index} (shape changed from {prev_masks.shape} to {curr_compact.shape})"
+            )
+
+        unmatched = np.where(curr_to_global[1:] == 0)[0] + 1
+        if unmatched.size > 0:
+            new_ids = np.arange(next_label, next_label + unmatched.size, dtype=np.int64)
+            curr_to_global[unmatched] = new_ids
+            next_label = int(new_ids[-1]) + 1
+        else:
+            next_label = max(next_label, int(curr_to_global.max()) + 1)
+
+        stitched = curr_to_global[curr_compact]
+        max_label = int(stitched.max()) if stitched.size else 0
+        if max_label < 2**16:
+            stitched = stitched.astype(np.uint16, copy=False)
+        elif max_label < 2**32:
+            stitched = stitched.astype(np.uint32, copy=False)
+
+        self._seg_all_time_prev_masks = stitched.copy()
+        self._seg_all_time_next_label = next_label
+        return stitched
+
+    def _cache_segmentation_result(self, masks, time_index, preserve_labels=False):
         """Cache per-timepoint segmentation in memory for live browsing and export."""
         if time_index is None:
             return
@@ -2528,19 +2663,20 @@ class MainW(QMainWindow):
                 "colors": None,
                 "time_index": t,
                 "axes": "ZYX" if masks_arr.ndim == 3 else "YX",
+                "preserve_labels": bool(preserve_labels),
             }
         except Exception as e:
             print(f"ERROR: could not cache segmentation for T={time_index}: {e}")
 
 
     def compute_segmentation_all_timepoints(self, custom=False):
-        """Run segmentation for every timepoint in a 5D stack.
+        """Run segmentation for a selected timepoint range in a 5D stack.
 
         For 5D inputs (e.g. .sldy via LazySldy or TCZYX virtual stacks),
-        this iterates over all time indices and calls `compute_segmentation`
+        this iterates over the selected time indices and calls `compute_segmentation`
         at each timepoint, reusing the same model for speed.
 
-        ROIs are independent per time; no tracking across time is performed.
+        Optionally, ROI IDs can be stitched across adjacent timepoints.
         """
         if self._segmentation_running or self._segmentation_all_running:
             print("GUI_INFO: segmentation already running; please wait for it to finish")
@@ -2551,14 +2687,55 @@ class MainW(QMainWindow):
             self.start_segmentation_async(custom=custom)
             return
 
-        # initialize async all-timepoint segmentation state
+        # resolve selected timepoint range (inclusive)
+        nt_total = int(self.NT)
+        start_t, end_t = 0, nt_total - 1
+        try:
+            if hasattr(self, "segmentation_settings"):
+                start_t, end_t = self.segmentation_settings.get_timepoint_range(
+                    nt=nt_total
+                )
+        except Exception as e:
+            print(f"GUI_WARNING: invalid time range settings; using full range ({e})")
+            start_t, end_t = 0, nt_total - 1
+        if end_t < start_t:
+            start_t, end_t = end_t, start_t
+        selected_timepoints = list(range(int(start_t), int(end_t) + 1))
+        if len(selected_timepoints) == 0:
+            print("GUI_WARNING: no timepoints selected for segmentation")
+            return
+
+        # initialize async multi-timepoint segmentation state
         self._segmentation_all_running = True
-        self._seg_all_queue = list(range(int(self.NT)))
+        self._seg_all_queue = selected_timepoints
+        self._seg_all_total = len(selected_timepoints)
+        self._seg_all_current_t = None
         self._seg_all_original_T = int(getattr(self, "currentT", 0))
         self._seg_all_custom = bool(custom)
         # built-in CPSAM for non-custom runs
         self._seg_all_model_name = None if custom else "cpsam"
         self._seg_all_first = True
+        print(
+            "GUI_INFO: segmenting timepoints "
+            f"T={selected_timepoints[0]}..{selected_timepoints[-1]} "
+            f"({len(selected_timepoints)} total)"
+        )
+        self._reset_time_stitch_state()
+        try:
+            self._seg_all_time_stitch_enabled = bool(
+                getattr(self.segmentation_settings, "stitch_over_time", False)
+            )
+            self._seg_all_time_stitch_threshold = float(
+                getattr(self.segmentation_settings, "time_stitch_threshold", 0.25)
+            )
+        except Exception:
+            self._seg_all_time_stitch_enabled = False
+            self._seg_all_time_stitch_threshold = 0.25
+        if self._seg_all_time_stitch_enabled:
+            print(
+                "GUI_INFO: 4D time stitching enabled "
+                f"(IOU threshold={self._seg_all_time_stitch_threshold:.3f})"
+            )
         self._segmentation_running = False
         # kick off first timepoint
         self._segmentation_all_next()
@@ -2572,8 +2749,15 @@ class MainW(QMainWindow):
         if len(self._seg_all_queue) == 0:
             # finished all timepoints; mark complete and restore the timepoint
             # the user was on when the run started
+            print(
+                "GUI_INFO: completed timepoint-range segmentation "
+                f"({int(getattr(self, '_seg_all_total', 0))} attempted)"
+            )
             self._segmentation_all_running = False
             self._segmentation_running = False
+            self._seg_all_current_t = None
+            self._seg_all_total = 0
+            self._reset_time_stitch_state()
             try:
                 t_restore = int(getattr(self, "_seg_all_original_T", 0))
                 if getattr(self, "has_time", False) and int(getattr(self, "NT", 1)) > 1:
@@ -2584,6 +2768,10 @@ class MainW(QMainWindow):
 
         # get next timepoint to process (without changing the user's current view)
         t = self._seg_all_queue.pop(0)
+        self._seg_all_current_t = int(t)
+        seg_idx = int(getattr(self, "_seg_all_total", 0)) - len(self._seg_all_queue)
+        seg_total = int(getattr(self, "_seg_all_total", 0))
+        print(f"GUI_INFO: starting segmentation T={t} [{seg_idx}/{seg_total}]")
 
         # load model only on first timepoint; reuse for subsequent ones
         load_model = self._seg_all_first
@@ -2812,7 +3000,7 @@ class MainW(QMainWindow):
             )
             self.progress.setValue(80)
 
-            io._masks_to_gui(self, masks, outlines=None)
+            io._masks_to_gui(self, masks, outlines=None, preserve_labels=False)
             self.masksOn = True
             self.MCheckBox.setChecked(True)
             self.progress.setValue(100)
@@ -2823,6 +3011,7 @@ class MainW(QMainWindow):
             ):
                 self.compute_saturation()
             self.recompute_masks = recompute_masks
+            self._current_seg_preserve_labels = False
         except Exception as e:
             print("ERROR: %s" % e)
         else:
@@ -2880,7 +3069,11 @@ class MainW(QMainWindow):
         self._segmentation_thread.start()
 
     def _on_segmentation_error(self, message):
-        print(f"NET ERROR: {message}")
+        t_running = getattr(self, "_seg_all_current_t", None)
+        if t_running is None:
+            print(f"NET ERROR: {message}")
+        else:
+            print(f"NET ERROR at T={t_running}: {message}")
         self.progress.setValue(0)
         if self._segmentation_thread is not None:
             try:
@@ -2894,10 +3087,26 @@ class MainW(QMainWindow):
             flows_display = result.get("flows", None)
             recompute_masks = result.get("recompute_masks", False)
             elapsed = result.get("elapsed", None)
+            seg_time_index = result.get("time_index", None)
+            preserve_labels = False
             if masks is None or flows_display is None:
                 print("ERROR: segmentation worker returned no results")
                 self.progress.setValue(0)
                 return
+
+            if (
+                self._segmentation_all_running
+                and seg_time_index is not None
+                and getattr(self, "_seg_all_time_stitch_enabled", False)
+            ):
+                try:
+                    masks = self._stitch_masks_over_time(masks, seg_time_index)
+                    preserve_labels = True
+                except Exception as e:
+                    print(
+                        "GUI_WARNING: time-stitching failed at "
+                        f"T={seg_time_index}; keeping independent labels ({e})"
+                    )
 
             self.flows = flows_display
             n_cells = len(np.unique(masks)[1:])
@@ -2908,8 +3117,17 @@ class MainW(QMainWindow):
             else:
                 self.logger.info("%d cells found with model" % n_cells)
 
-            seg_time_index = result.get("time_index", None)
-            self._cache_segmentation_result(masks, seg_time_index)
+            self._cache_segmentation_result(
+                masks, seg_time_index, preserve_labels=preserve_labels
+            )
+            self._current_seg_preserve_labels = bool(preserve_labels)
+            if self._segmentation_all_running and seg_time_index is not None:
+                try:
+                    io._save_timepoint_mask_tiff(self, seg_time_index, masks=masks)
+                except Exception as e:
+                    print(
+                        f"ERROR: could not save incremental timepoint mask TIFF for T={seg_time_index}: {e}"
+                    )
 
             try:
                 current_T = int(getattr(self, "currentT", 0))
@@ -2929,10 +3147,19 @@ class MainW(QMainWindow):
             if should_switch_view:
                 self.set_time_index(seg_time_index)
             elif seg_time_index is None or current_T == seg_time_index:
-                io._masks_to_gui(self, masks, outlines=None)
+                io._masks_to_gui(
+                    self, masks, outlines=None, preserve_labels=preserve_labels
+                )
                 self.masksOn = True
                 if hasattr(self, "MCheckBox"):
                     self.MCheckBox.setChecked(True)
+
+            if self._segmentation_all_running and seg_time_index is not None:
+                done_n = int(getattr(self, "_seg_all_total", 0)) - len(
+                    getattr(self, "_seg_all_queue", [])
+                )
+                total_n = int(getattr(self, "_seg_all_total", 0))
+                print(f"GUI_INFO: finished segmentation T={seg_time_index} [{done_n}/{total_n}]")
 
             self.progress.setValue(100)
             self.recompute_masks = recompute_masks
@@ -2961,3 +3188,6 @@ class MainW(QMainWindow):
             except Exception as e:
                 print(f"ERROR: could not advance multi-timepoint segmentation: {e}")
                 self._segmentation_all_running = False
+                self._seg_all_current_t = None
+                self._seg_all_total = 0
+                self._reset_time_stitch_state()

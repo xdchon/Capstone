@@ -2,7 +2,7 @@
 Copyright © 2025 Howard Hughes Medical Institute, Authored by Carsen Stringer , Michael Rariden and Marius Pachitariu.
 """
 from qtpy import QtGui, QtCore
-from qtpy.QtGui import QPixmap, QDoubleValidator
+from qtpy.QtGui import QPixmap, QDoubleValidator, QIntValidator
 from qtpy.QtWidgets import QWidget, QDialog, QGridLayout, QPushButton, QLabel, QLineEdit, QDialogButtonBox, QComboBox, QCheckBox, QVBoxLayout
 import pyqtgraph as pg
 import numpy as np
@@ -145,7 +145,7 @@ class ModelButton(QPushButton):
         self.model_name = "cpsam"
 
     def press(self, parent):
-        # if requested, run segmentation across all timepoints for 5D stacks
+        # if requested, run segmentation across selected timepoint range for 5D stacks
         if hasattr(parent, "segmentation_settings") and getattr(
             parent.segmentation_settings, "segment_all_timepoints", False
         ):
@@ -378,15 +378,80 @@ class SegmentationSettings(QWidget):
 
         row += 1
 
-        self.segment_all_timepoints_cb = QCheckBox("segment all timepoints")
+        self.segment_all_timepoints_cb = QCheckBox("segment timepoint range")
         self.segment_all_timepoints_cb.setFont(font)
         self.segment_all_timepoints_cb.setToolTip(
-            "if checked and a 5D stack (.sldy / TCZYX) is loaded, run segmentation for every timepoint.\n"
-            "ROIs are independent per time; no tracking across time is performed."
+            "if checked and a 5D stack (.sldy / TCZYX) is loaded, run segmentation over the selected time range.\n"
+            "if unchecked, only the currently visible timepoint is segmented."
         )
         grid_layout.addWidget(self.segment_all_timepoints_cb, row, 0, 1, 8)
 
+        row += 1
+        time_range_label = QLabel("time range (inclusive):")
+        time_range_label.setToolTip(
+            "start/end timepoint to segment when 'segment timepoint range' is enabled.\n"
+            "use -1 as end to mean the last timepoint."
+        )
+        time_range_label.setFont(font)
+        grid_layout.addWidget(time_range_label, row, 0, 1, 4)
+        self.time_range_start_box = QLineEdit()
+        self.time_range_start_box.setText("0")
+        self.time_range_start_box.setFixedWidth(48)
+        self.time_range_start_box.setFont(font)
+        self.time_range_start_box.setToolTip("first timepoint index to segment (0-based).")
+        self.time_range_start_box.setValidator(QIntValidator(0, 1_000_000))
+        grid_layout.addWidget(self.time_range_start_box, row, 4, 1, 2)
+        time_to_label = QLabel("to")
+        time_to_label.setFont(font)
+        grid_layout.addWidget(time_to_label, row, 6, 1, 1)
+        self.time_range_end_box = QLineEdit()
+        self.time_range_end_box.setText("-1")
+        self.time_range_end_box.setFixedWidth(48)
+        self.time_range_end_box.setFont(font)
+        self.time_range_end_box.setToolTip(
+            "last timepoint index to segment (0-based). use -1 for last available."
+        )
+        self.time_range_end_box.setValidator(QIntValidator(-1, 1_000_000))
+        grid_layout.addWidget(self.time_range_end_box, row, 7, 1, 1)
+
+        row += 1
+        self.stitch_over_time_cb = QCheckBox("stitch ROI IDs across time (4D)")
+        self.stitch_over_time_cb.setFont(font)
+        self.stitch_over_time_cb.setToolTip(
+            "when segmenting a timepoint range, link ROIs between consecutive timepoints using IOU.\n"
+            "keeps stable ROI IDs over time (tracking-like labels) instead of independent IDs per timepoint."
+        )
+        grid_layout.addWidget(self.stitch_over_time_cb, row, 0, 1, 8)
+
+        row += 1
+        time_stitch_thresh_label = QLabel("time stitch IOU:")
+        time_stitch_thresh_label.setToolTip(
+            "minimum IOU to keep the same ROI ID between adjacent timepoints (0-1)."
+        )
+        time_stitch_thresh_label.setFont(font)
+        grid_layout.addWidget(time_stitch_thresh_label, row, 0, 1, 4)
+        self.time_stitch_threshold_box = QLineEdit()
+        self.time_stitch_threshold_box.setText("0.25")
+        self.time_stitch_threshold_box.setFixedWidth(48)
+        self.time_stitch_threshold_box.setFont(font)
+        self.time_stitch_threshold_box.setToolTip(
+            "minimum IOU to stitch ROI IDs over time."
+        )
+        grid_layout.addWidget(self.time_stitch_threshold_box, row, 4, 1, 2)
+
+        self.segment_all_timepoints_cb.toggled.connect(self._update_time_range_enabled)
+        self._update_time_range_enabled()
         self.setLayout(grid_layout)
+
+    def _update_time_range_enabled(self):
+        enabled = self.segment_all_timepoints_cb.isChecked()
+        for widget in (
+            self.time_range_start_box,
+            self.time_range_end_box,
+            self.stitch_over_time_cb,
+            self.time_stitch_threshold_box,
+        ):
+            widget.setEnabled(enabled)
 
     def validate_normalization_range(self):
         low_text = self.norm_percentile_low_box.text()
@@ -473,8 +538,88 @@ class SegmentationSettings(QWidget):
 
     @property
     def segment_all_timepoints(self):
-        """Whether to segment all timepoints in a 5D stack."""
+        """Whether to segment a selected timepoint range in a 5D stack."""
         return self.segment_all_timepoints_cb.isChecked()
+
+    @property
+    def time_range_start(self):
+        text = self.time_range_start_box.text().strip()
+        try:
+            val = int(text)
+        except ValueError:
+            val = 0
+        if val < 0:
+            val = 0
+        self.time_range_start_box.setText(str(val))
+        return val
+
+    @property
+    def time_range_end(self):
+        text = self.time_range_end_box.text().strip()
+        try:
+            val = int(text)
+        except ValueError:
+            val = -1
+        if val < -1:
+            val = -1
+        self.time_range_end_box.setText(str(val))
+        return val
+
+    def get_timepoint_range(self, nt=None):
+        """
+        Return an inclusive [start, end] timepoint range.
+        If `nt` is provided, values are clamped to [0, nt-1], and end=-1 maps to nt-1.
+        """
+        start = self.time_range_start
+        end_raw = self.time_range_end
+        if nt is None:
+            end = end_raw
+            if end >= 0 and end < start:
+                start, end = end, start
+                self.time_range_start_box.setText(str(start))
+                self.time_range_end_box.setText(str(end))
+            return start, end
+
+        try:
+            nt_int = int(nt)
+        except Exception:
+            nt_int = None
+        if nt_int is None or nt_int <= 0:
+            return 0, 0
+
+        start = max(0, min(start, nt_int - 1))
+        if end_raw < 0:
+            end = nt_int - 1
+        else:
+            end = max(0, min(end_raw, nt_int - 1))
+            if end < start:
+                start, end = end, start
+                self.time_range_end_box.setText(str(end))
+
+        self.time_range_start_box.setText(str(start))
+        if end_raw >= 0:
+            self.time_range_end_box.setText(str(end))
+        return start, end
+
+    @property
+    def stitch_over_time(self):
+        """Whether to stitch ROI IDs over time (4D labeling)."""
+        return self.stitch_over_time_cb.isChecked()
+
+    @property
+    def time_stitch_threshold(self):
+        """IOU threshold used for stitching labels across time."""
+        text = self.time_stitch_threshold_box.text().strip()
+        try:
+            val = float(text)
+        except ValueError:
+            val = 0.25
+        if val < 0.0:
+            val = 0.0
+        if val > 1.0:
+            val = 1.0
+        self.time_stitch_threshold_box.setText(f"{val:.3f}".rstrip("0").rstrip("."))
+        return val
 
 
 

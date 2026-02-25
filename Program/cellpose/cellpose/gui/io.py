@@ -206,8 +206,20 @@ def _load_image(parent, filename=None, load_seg=True, load_3D=False):
                                     masks = dat_t.get("masks", None)
                                     outlines = dat_t.get("outlines", None)
                                     colors = dat_t.get("colors", None)
+                                    preserve_labels = bool(
+                                        dat_t.get(
+                                            "preserve_labels",
+                                            all_dat.get("stitch_over_time", False),
+                                        )
+                                    )
                                     if masks is not None:
-                                        _masks_to_gui(parent, masks, outlines=outlines, colors=colors)
+                                        _masks_to_gui(
+                                            parent,
+                                            masks,
+                                            outlines=outlines,
+                                            colors=colors,
+                                            preserve_labels=preserve_labels,
+                                        )
                                         seg_loaded = True
 
                             # Fallback: OME-style TZYX arrays at top-level (no per_time mapping)
@@ -229,10 +241,19 @@ def _load_image(parent, filename=None, load_seg=True, load_3D=False):
                                         if 0 <= t_index < arr_tzyx.shape[0]:
                                             masks_t = arr_tzyx[t_index]
                                             outlines_t = None
+                                            preserve_labels = bool(
+                                                all_dat.get("stitch_over_time", False)
+                                            )
                                             if isinstance(outlines_all, np.ndarray) and outlines_all.shape == masks_all.shape:
                                                 out_arr = np.transpose(outlines_all, order)
                                                 outlines_t = out_arr[t_index]
-                                            _masks_to_gui(parent, masks_t, outlines=outlines_t, colors=None)
+                                            _masks_to_gui(
+                                                parent,
+                                                masks_t,
+                                                outlines=outlines_t,
+                                                colors=None,
+                                                preserve_labels=preserve_labels,
+                                            )
                                             seg_loaded = True
                                     except Exception as ee:
                                         print(f"ERROR: could not interpret OME-style masks in {seg_all_path}: {ee}")
@@ -252,8 +273,15 @@ def _load_image(parent, filename=None, load_seg=True, load_3D=False):
                             masks = dat.get("masks", None)
                             outlines = dat.get("outlines", None)
                             colors = dat.get("colors", None)
+                            preserve_labels = bool(dat.get("preserve_labels", False))
                             if masks is not None:
-                                _masks_to_gui(parent, masks, outlines=outlines, colors=colors)
+                                _masks_to_gui(
+                                    parent,
+                                    masks,
+                                    outlines=outlines,
+                                    colors=colors,
+                                    preserve_labels=preserve_labels,
+                                )
                                 seg_loaded = True
 
                     # final fallback: by-timepoint TIFF folder (e.g. *_cp_masks_by_time)
@@ -672,7 +700,13 @@ def _load_seg(parent, filename=None, image=None, image_file=None, load_3D=False)
             else:
                 colors = parent.colormap[:parent.ncells.get(), :3]
 
-            _masks_to_gui(parent, dat["masks"], outlines=dat["outlines"], colors=colors)
+            _masks_to_gui(
+                parent,
+                dat["masks"],
+                outlines=dat["outlines"],
+                colors=colors,
+                preserve_labels=bool(dat.get("preserve_labels", False)),
+            )
 
             parent.draw_layer()
 
@@ -762,11 +796,19 @@ def _load_masks(parent, filename=None):
     parent.update_plot()
 
 
-def _masks_to_gui(parent, masks, outlines=None, colors=None):
+def _masks_to_gui(parent, masks, outlines=None, colors=None, preserve_labels=False):
     """ masks loaded into GUI """
+    masks = np.asarray(masks).copy()
+    if isinstance(outlines, np.ndarray):
+        outlines = np.asarray(outlines).copy()
+    try:
+        parent._display_preserve_labels = bool(preserve_labels)
+    except Exception:
+        pass
+
     # get unique values
     shape = masks.shape
-    if len(fastremap.unique(masks)) != masks.max() + 1:
+    if (not preserve_labels) and len(fastremap.unique(masks)) != masks.max() + 1:
         print("GUI_INFO: renumbering masks")
         fastremap.renumber(masks, in_place=True)
         outlines = None
@@ -849,7 +891,14 @@ def _masks_to_gui(parent, masks, outlines=None, colors=None):
                 parent.outpix_orig = parent.outpix_orig[np.newaxis, :, :]
 
     parent.ncells.set(parent.cellpix.max())
-    colors = parent.colormap[:parent.ncells.get(), :3] if colors is None else colors
+    if colors is None:
+        n_ids = int(parent.ncells.get())
+        cmap = np.asarray(parent.colormap[:, :3], dtype=np.uint8)
+        if n_ids <= cmap.shape[0]:
+            colors = cmap[:n_ids]
+        else:
+            reps = int(np.ceil(float(n_ids) / float(cmap.shape[0])))
+            colors = np.tile(cmap, (reps, 1))[:n_ids]
     print("GUI_INFO: creating cellcolors and drawing masks")
     parent.cellcolors = np.concatenate((np.array([[255, 255, 255]]), colors),
                                        axis=0).astype(np.uint8)
@@ -897,6 +946,98 @@ def _as_zyx_mask(arr):
     if arr.ndim == 3:
         return arr
     raise ValueError(f"expected 2D or 3D mask array, got shape {arr.shape}")
+
+
+def _label_dtype_for_masks(arr):
+    """Choose label dtype (uint16 / uint32) from max label value."""
+    try:
+        max_label = int(np.asarray(arr).max()) if np.asarray(arr).size else 0
+    except Exception:
+        max_label = 0
+    return np.uint16 if max_label < 2**16 else np.uint32
+
+
+def _save_timepoint_mask_tiff(
+    parent,
+    time_index,
+    masks=None,
+    *,
+    base=None,
+    label_dtype=None,
+    compression="zlib",
+    verbose=True,
+):
+    """
+    Save one labeled mask TIFF for a single timepoint to `*_cp_masks_by_time`.
+    Returns the written file path.
+    """
+    try:
+        t = int(time_index)
+    except Exception as e:
+        raise ValueError(f"invalid time index: {time_index}") from e
+
+    if base is None:
+        base = os.path.splitext(parent.filename)[0]
+
+    arr = np.asarray(parent.cellpix if masks is None else masks)
+    arr = np.squeeze(arr)
+    if arr.ndim not in (2, 3):
+        raise ValueError(f"expected 2D or 3D masks, got shape {arr.shape}")
+
+    nz = int(getattr(parent, "NZ", 1))
+    Ly = int(getattr(parent, "Ly0", getattr(parent, "Ly", arr.shape[-2])))
+    Lx = int(getattr(parent, "Lx0", getattr(parent, "Lx", arr.shape[-1])))
+    if nz <= 0:
+        nz = 1
+    if Ly <= 0 or Lx <= 0:
+        raise ValueError(f"invalid target image shape for saving: (Z={nz}, Y={Ly}, X={Lx})")
+
+    out_dtype = _label_dtype_for_masks(arr) if label_dtype is None else np.dtype(label_dtype)
+    vol = np.zeros((nz, Ly, Lx), dtype=out_dtype)
+    if arr.ndim == 2:
+        y_min = min(Ly, arr.shape[0])
+        x_min = min(Lx, arr.shape[1])
+        vol[0, :y_min, :x_min] = arr[:y_min, :x_min].astype(out_dtype, copy=False)
+    else:
+        z_min = min(nz, arr.shape[0])
+        y_min = min(Ly, arr.shape[1])
+        x_min = min(Lx, arr.shape[2])
+        vol[:z_min, :y_min, :x_min] = arr[:z_min, :y_min, :x_min].astype(
+            out_dtype, copy=False
+        )
+
+    out_dir = base + "_cp_masks_by_time"
+    os.makedirs(out_dir, exist_ok=True)
+    out_path = os.path.join(out_dir, f"masks_T{t:04d}_ZYX.tif")
+    tifffile.imwrite(
+        out_path,
+        vol,
+        compression=compression,
+        metadata={"axes": "ZYX"},
+    )
+
+    # keep folder cache fresh for quick by-time loading
+    try:
+        parent._time_mask_base = base
+        parent._time_mask_folder = out_dir
+        parent._time_mask_folder_mtime = os.path.getmtime(out_dir)
+        if not isinstance(getattr(parent, "_time_mask_file_map", None), dict):
+            parent._time_mask_file_map = {}
+        parent._time_mask_file_map[t] = out_path
+        parent.available_mask_timepoints = sorted(parent._time_mask_file_map.keys())
+    except Exception:
+        pass
+
+    if verbose:
+        try:
+            max_label = int(vol.max()) if vol.size else 0
+        except Exception:
+            max_label = 0
+        print(
+            f"GUI_INFO: saved timepoint mask TIFF T={t} -> {out_path} "
+            f"(dtype={np.dtype(out_dtype).name}, max={max_label})"
+        )
+    return out_path
 
 
 def _default_ome_output_from_mask_folder(folder):
@@ -1010,6 +1151,7 @@ def _load_timepoint_mask_from_by_time(parent, base, t_index):
             "colors": None,
             "time_index": t,
             "axes": "ZYX",
+            "preserve_labels": False,
         }
         print(
             f"GUI_INFO: loaded timepoint mask T={t} from by-time folder file {os.path.basename(mask_path)}"
@@ -1197,17 +1339,12 @@ def _save_png(parent):
     filename = parent.filename
     base = os.path.splitext(filename)[0]
 
-    def _label_dtype(arr):
-        try:
-            max_label = int(np.asarray(arr).max()) if np.asarray(arr).size else 0
-        except Exception:
-            max_label = 0
-        return np.uint16 if max_label < 2**16 else np.uint32
-
     if parent.NZ == 1:
         if parent.cellpix[0].max() > 65534:
             print("GUI_INFO: saving 2D masks to tif (too many masks for PNG)")
-            labels_2d = np.asarray(parent.cellpix[0], dtype=_label_dtype(parent.cellpix[0]))
+            labels_2d = np.asarray(
+                parent.cellpix[0], dtype=_label_dtype_for_masks(parent.cellpix[0])
+            )
             tifffile.imwrite(
                 base + "_cp_masks.tif",
                 labels_2d,
@@ -1222,7 +1359,7 @@ def _save_png(parent):
             imsave(base + "_cp_masks.png", parent.cellpix[0].astype(np.uint16))
     else:
         print("GUI_INFO: saving 3D masks to tiff")
-        labels_zyx = np.asarray(parent.cellpix, dtype=_label_dtype(parent.cellpix))
+        labels_zyx = np.asarray(parent.cellpix, dtype=_label_dtype_for_masks(parent.cellpix))
         tifffile.imwrite(
             base + "_cp_masks.tif",
             labels_zyx,
@@ -1314,13 +1451,14 @@ def _save_png(parent):
     fallback_dir = base + "_cp_masks_by_time"
     os.makedirs(fallback_dir, exist_ok=True)
     for t, arr in entries:
-        vol = np.zeros((nz, Ly, Lx), dtype=label_dtype)
-        _copy_to_zyx(vol, arr)
-        tifffile.imwrite(
-            os.path.join(fallback_dir, f"masks_T{t:04d}_ZYX.tif"),
-            vol,
+        _save_timepoint_mask_tiff(
+            parent,
+            t,
+            masks=arr,
+            base=base,
+            label_dtype=label_dtype,
             compression="zlib",
-            metadata={"axes": "ZYX"},
+            verbose=False,
         )
     print(
         f"GUI_INFO: saved {len(entries)} per-timepoint labeled TIFF stacks in {fallback_dir}"
@@ -1454,6 +1592,10 @@ def _save_sets(parent):
         per_time_save = base + "_seg.npy"
     flow_threshold = parent.segmentation_settings.flow_threshold
     cellprob_threshold = parent.segmentation_settings.cellprob_threshold
+    preserve_labels = bool(
+        getattr(parent, "_current_seg_preserve_labels", False)
+        or getattr(parent, "_display_preserve_labels", False)
+    )
 
     if parent.NZ > 1:
         dat = {
@@ -1488,6 +1630,8 @@ def _save_sets(parent):
             # spatial axes for volumetric masks: Z (planes), Y, X
             "axes":
                 "ZYX",
+            "preserve_labels":
+                preserve_labels,
         }
         if time_index is not None:
             dat["time_index"] = time_index
@@ -1529,6 +1673,8 @@ def _save_sets(parent):
             # spatial axes for 2D masks: Y, X
             "axes":
                 "YX",
+            "preserve_labels":
+                preserve_labels,
         }
         if time_index is not None:
             dat["time_index"] = time_index
@@ -1572,6 +1718,13 @@ def _save_sets(parent):
             per_time[time_index] = dat
             all_dat["per_time"] = per_time
             all_dat["filename"] = parent.filename
+            try:
+                all_dat["stitch_over_time"] = any(
+                    isinstance(v, dict) and bool(v.get("preserve_labels", False))
+                    for v in per_time.values()
+                )
+            except Exception:
+                all_dat["stitch_over_time"] = preserve_labels
 
             # determine number of timepoints and spatial shape
             NT_existing = all_dat.get("NT", None)
