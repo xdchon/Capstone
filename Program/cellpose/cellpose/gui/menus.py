@@ -48,8 +48,17 @@ def mainmenu(parent):
     file_menu.addAction(parent.savePNG)
     parent.savePNG.setEnabled(False)
 
+    parent.make4DStack = QAction(
+        "Make 4D stack (stitch by-time masks)", parent
+    )
+    parent.make4DStack.triggered.connect(
+        lambda: io._make_4d_stack_from_timepoint_masks(parent)
+    )
+    file_menu.addAction(parent.make4DStack)
+    parent.make4DStack.setEnabled(True)
+
     parent.buildOmeFromMasks = QAction(
-        "Build OME-TIFF from timepoint mask folder", parent
+        "Build OME-TIFF from by-time mask folder (no stitching)", parent
     )
     parent.buildOmeFromMasks.triggered.connect(
         lambda: io._build_ome_from_timepoint_masks(parent)

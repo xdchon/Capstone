@@ -719,6 +719,18 @@ class MainW(QMainWindow):
         self.drawBoxG.addWidget(self.MCheckBox, widget_row, 0, 1, 5)
 
         widget_row += 1
+        self.show_4d_stitch_view = False
+        self.show4DStitchCheckBox = QCheckBox("show 4D stitched masks")
+        self.show4DStitchCheckBox.setFont(self.medfont)
+        self.show4DStitchCheckBox.setChecked(False)
+        self.show4DStitchCheckBox.setToolTip(
+            "toggle visualization of post-processed 4D stitched masks.\n"
+            "when enabled, time navigation prefers *_cp_masks_4d_by_time outputs."
+        )
+        self.show4DStitchCheckBox.toggled.connect(self.toggle_4d_stitch_view)
+        self.drawBoxG.addWidget(self.show4DStitchCheckBox, widget_row, 0, 1, 8)
+
+        widget_row += 1
         # turn off outlines
         self.outlinesOn = False  # turn off by default
         self.OCheckBox = QCheckBox("outlines on [Z]")
@@ -952,6 +964,13 @@ class MainW(QMainWindow):
             if w is None:
                 continue
             w.setVisible(show_time)
+        if hasattr(self, "show4DStitchCheckBox"):
+            self.show4DStitchCheckBox.setEnabled(show_time)
+            if not show_time:
+                self.show_4d_stitch_view = False
+                self.show4DStitchCheckBox.blockSignals(True)
+                self.show4DStitchCheckBox.setChecked(False)
+                self.show4DStitchCheckBox.blockSignals(False)
         if show_time:
             if hasattr(self, "timeScrollTop") and self.timeScrollTop is not None:
                 self.timeScrollTop.setMaximum(self.NT - 1)
@@ -965,13 +984,13 @@ class MainW(QMainWindow):
                 self.timeScrollBottom.blockSignals(False)
             self.timePos.setText(str(self.currentT))
 
-    def set_time_index(self, t):
+    def set_time_index(self, t, force_reload=False):
         has_lazy = hasattr(self, "lazy_data") and self.lazy_data is not None
         if not (self.has_time and (self.time_stack is not None or has_lazy)):
             return
         last_z = getattr(self, "currentZ", 0)
         t_clamped = max(0, min(self.NT - 1, int(t)))
-        if t_clamped == self.currentT and self.loaded:
+        if t_clamped == self.currentT and self.loaded and not force_reload:
             self.timePos.setText(str(t_clamped))
             return
         self.currentT = t_clamped
@@ -1005,8 +1024,15 @@ class MainW(QMainWindow):
             try:
                 base, _ = os.path.splitext(self.filename)
                 t_index = int(getattr(self, "currentT", 0))
+                prefer_stitched_view = bool(
+                    getattr(self, "show_4d_stitch_view", False)
+                )
                 # prefer in-memory aggregated time-lapse seg if available
-                per_time = getattr(self, "seg_time_data", None)
+                per_time = (
+                    getattr(self, "seg_time_data_4d", None)
+                    if prefer_stitched_view
+                    else getattr(self, "seg_time_data", None)
+                )
                 if isinstance(per_time, dict):
                     dat_t = per_time.get(t_index)
                     if dat_t is None and str(t_index) in per_time:
@@ -1144,9 +1170,20 @@ class MainW(QMainWindow):
                             seg_loaded = True
                 # final fallback: by-timepoint TIFF folder (e.g. *_cp_masks_by_time)
                 if not seg_loaded:
+                    prefer_stitched = bool(getattr(self, "show_4d_stitch_view", False))
                     seg_loaded = io._load_timepoint_mask_from_by_time(
-                        self, base, t_index
+                        self,
+                        base,
+                        t_index,
+                        prefer_stitched=prefer_stitched,
                     )
+                    if (not seg_loaded) and prefer_stitched:
+                        seg_loaded = io._load_timepoint_mask_from_by_time(
+                            self,
+                            base,
+                            t_index,
+                            prefer_stitched=False,
+                        )
             except Exception as e:
                 print(f"ERROR: could not auto-load seg for T={self.currentT}: {e}")
             if not seg_loaded and hasattr(self, "cellpix") and hasattr(self, "NZ") and self.NZ is not None:
@@ -1469,6 +1506,20 @@ class MainW(QMainWindow):
             self.update_plot()
             self.update_layer()
 
+    def toggle_4d_stitch_view(self, checked):
+        self.show_4d_stitch_view = bool(checked)
+        state = "ON" if self.show_4d_stitch_view else "OFF"
+        print(f"GUI_INFO: show 4D stitched masks is {state}")
+        if (
+            self.loaded
+            and bool(getattr(self, "has_time", False))
+            and int(getattr(self, "NT", 1)) > 1
+        ):
+            try:
+                self.set_time_index(int(getattr(self, "currentT", 0)), force_reload=True)
+            except Exception as e:
+                print(f"GUI_WARNING: could not refresh timepoint after 4D-view toggle: {e}")
+
     def make_viewbox(self):
         self.p0 = guiparts.ViewBoxNoRightDrag(parent=self, lockAspect=True,
                                               name="plot1", border=[100, 100,
@@ -1546,6 +1597,7 @@ class MainW(QMainWindow):
         self.loaded = False
         self.recompute_masks = False
         self.seg_time_data = None
+        self.seg_time_data_4d = None
         self._current_seg_time_index = None
         self._current_seg_preserve_labels = False
         self._seg_all_total = 0
@@ -1556,6 +1608,11 @@ class MainW(QMainWindow):
         self._time_mask_folder_mtime = None
         self._time_mask_file_map = None
         self.available_mask_timepoints = []
+        self._time_mask_base_4d = None
+        self._time_mask_folder_4d = None
+        self._time_mask_folder_mtime_4d = None
+        self._time_mask_file_map_4d = None
+        self.available_mask_timepoints_4d = []
 
         self.deleting_multiple = False
         self.removing_cells_list = []
@@ -3166,7 +3223,20 @@ class MainW(QMainWindow):
             self._current_seg_preserve_labels = bool(preserve_labels)
             if self._segmentation_all_running and seg_time_index is not None:
                 try:
-                    io._save_timepoint_mask_tiff(self, seg_time_index, masks=masks)
+                    base = os.path.splitext(self.filename)[0]
+                    save_dir = (
+                        base + "_cp_masks_4d_by_time"
+                        if preserve_labels
+                        else base + "_cp_masks_by_time"
+                    )
+                    io._save_timepoint_mask_tiff(
+                        self,
+                        seg_time_index,
+                        masks=masks,
+                        base=base,
+                        output_folder=save_dir,
+                        cache_as_stitched=bool(preserve_labels),
+                    )
                 except Exception as e:
                     print(
                         f"ERROR: could not save incremental timepoint mask TIFF for T={seg_time_index}: {e}"

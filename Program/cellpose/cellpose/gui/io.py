@@ -9,7 +9,8 @@ import tifffile
 
 from ..io import imread, imread_2D, imread_3D, imsave, outlines_to_text, add_model, remove_model, save_rois
 from ..models import normalize_default, MODEL_DIR, MODEL_LIST_PATH, get_user_models
-from ..utils import masks_to_outlines, outlines_list
+from ..utils import masks_to_outlines, outlines_list, stitch3D
+from .. import metrics
 
 try:
     import qtpy
@@ -286,9 +287,22 @@ def _load_image(parent, filename=None, load_seg=True, load_3D=False):
 
                     # final fallback: by-timepoint TIFF folder (e.g. *_cp_masks_by_time)
                     if not seg_loaded:
-                        seg_loaded = _load_timepoint_mask_from_by_time(
-                            parent, base, t_index
+                        prefer_stitched = bool(
+                            getattr(parent, "show_4d_stitch_view", False)
                         )
+                        seg_loaded = _load_timepoint_mask_from_by_time(
+                            parent,
+                            base,
+                            t_index,
+                            prefer_stitched=prefer_stitched,
+                        )
+                        if (not seg_loaded) and prefer_stitched:
+                            seg_loaded = _load_timepoint_mask_from_by_time(
+                                parent,
+                                base,
+                                t_index,
+                                prefer_stitched=False,
+                            )
             except Exception as e:
                 print(f"ERROR: could not auto-load seg on initial load: {e}")
 
@@ -957,18 +971,238 @@ def _label_dtype_for_masks(arr):
     return np.uint16 if max_label < 2**16 else np.uint32
 
 
+def _clamp_stitch_threshold(value, default=0.25):
+    """Clamp stitching IOU threshold to [0, 1]."""
+    try:
+        th = float(value)
+    except Exception:
+        th = float(default)
+    if th < 0.0:
+        th = 0.0
+    if th > 1.0:
+        th = 1.0
+    return th
+
+
+def _default_4d_stitched_folder_from_mask_folder(input_folder):
+    """
+    Infer output folder for post-processed 4D-stitched masks.
+    Example: sample_cp_masks_by_time -> sample_cp_masks_4d_by_time
+    """
+    folder = os.path.abspath(os.path.expanduser(str(input_folder)))
+    parent_dir = os.path.dirname(folder)
+    name = os.path.basename(folder)
+    if name.endswith("_cp_masks_by_time"):
+        stem = name[: -len("_cp_masks_by_time")]
+    elif name.endswith("_masks_by_time"):
+        stem = name[: -len("_masks_by_time")]
+    elif name.endswith("_by_time"):
+        stem = name[: -len("_by_time")]
+    else:
+        stem = name
+    return os.path.join(parent_dir, stem + "_cp_masks_4d_by_time")
+
+
+def _compact_positive_labels(labels):
+    """Map positive labels to compact IDs [1..N], preserving 0 as background."""
+    arr = np.asarray(labels)
+    uniq = np.unique(arr)
+    uniq = uniq[uniq > 0]
+    if uniq.size == 0:
+        return np.zeros(arr.shape, dtype=np.int32), uniq
+
+    flat = arr.reshape(-1)
+    idx = np.searchsorted(uniq, flat)
+    safe_idx = np.clip(idx, 0, uniq.size - 1)
+    valid = (flat > 0) & (idx < uniq.size) & (uniq[safe_idx] == flat)
+    compact_flat = np.zeros(flat.shape[0], dtype=np.int32)
+    compact_flat[valid] = safe_idx[valid] + 1
+    return compact_flat.reshape(arr.shape), uniq
+
+
+def _stitch_masks_over_z_for_volume(masks, stitch_threshold=0.25):
+    """Stitch ROI IDs across adjacent Z planes for one timepoint volume."""
+    arr = np.asarray(masks)
+    if arr.ndim != 3 or arr.shape[0] <= 1:
+        return arr
+    th = _clamp_stitch_threshold(stitch_threshold, default=0.25)
+    stitched = stitch3D(arr.astype(np.int32, copy=True), stitch_threshold=th)
+    max_label = int(stitched.max()) if stitched.size else 0
+    if max_label < 2**16:
+        return stitched.astype(np.uint16, copy=False)
+    if max_label < 2**32:
+        return stitched.astype(np.uint32, copy=False)
+    return stitched
+
+
+def _stitch_masks_over_time_with_state(
+    current_masks,
+    previous_stitched_masks,
+    next_label,
+    *,
+    stitch_threshold=0.25,
+    time_index=None,
+):
+    """
+    Stitch one timepoint to the previous stitched result.
+    Returns (stitched_current, updated_next_label).
+    """
+    curr_compact, _ = _compact_positive_labels(current_masks)
+    n_curr = int(curr_compact.max()) if curr_compact.size else 0
+    if n_curr == 0:
+        stitched_empty = np.zeros_like(curr_compact, dtype=np.uint16)
+        return stitched_empty, int(next_label)
+
+    curr_to_global = np.zeros(n_curr + 1, dtype=np.int64)
+    next_label_int = int(next_label)
+    threshold = _clamp_stitch_threshold(stitch_threshold, default=0.25)
+
+    if (
+        isinstance(previous_stitched_masks, np.ndarray)
+        and previous_stitched_masks.size > 0
+        and previous_stitched_masks.shape == curr_compact.shape
+    ):
+        prev_compact, prev_global_ids = _compact_positive_labels(previous_stitched_masks)
+        if prev_global_ids.size > 0:
+            iou = metrics._intersection_over_union(curr_compact, prev_compact)[1:, 1:]
+            if iou.size > 0:
+                pairs = np.argwhere(iou >= threshold)
+                if pairs.size > 0:
+                    scores = iou[pairs[:, 0], pairs[:, 1]]
+                    order = np.argsort(scores)[::-1]
+                    used_curr = np.zeros(n_curr + 1, dtype=bool)
+                    used_prev = np.zeros(prev_global_ids.size + 1, dtype=bool)
+                    for oi in order:
+                        c_id = int(pairs[oi, 0]) + 1
+                        p_id = int(pairs[oi, 1]) + 1
+                        if used_curr[c_id] or used_prev[p_id]:
+                            continue
+                        curr_to_global[c_id] = int(prev_global_ids[p_id - 1])
+                        used_curr[c_id] = True
+                        used_prev[p_id] = True
+    elif isinstance(previous_stitched_masks, np.ndarray) and previous_stitched_masks.size > 0:
+        print(
+            "GUI_WARNING: skipping time-stitch due to shape mismatch "
+            f"at T={time_index} (prev={previous_stitched_masks.shape}, curr={curr_compact.shape})"
+        )
+
+    unmatched = np.where(curr_to_global[1:] == 0)[0] + 1
+    if unmatched.size > 0:
+        new_ids = np.arange(
+            next_label_int, next_label_int + unmatched.size, dtype=np.int64
+        )
+        curr_to_global[unmatched] = new_ids
+        next_label_int = int(new_ids[-1]) + 1
+    else:
+        next_label_int = max(next_label_int, int(curr_to_global.max()) + 1)
+
+    stitched = curr_to_global[curr_compact]
+    max_label = int(stitched.max()) if stitched.size else 0
+    if max_label < 2**16:
+        stitched = stitched.astype(np.uint16, copy=False)
+    elif max_label < 2**32:
+        stitched = stitched.astype(np.uint32, copy=False)
+    return stitched, next_label_int
+
+
+def stitch_timepoint_masks_folder(
+    input_folder,
+    output_folder=None,
+    *,
+    stitch_threshold=0.25,
+    stitch_over_z=True,
+    strict_shape=False,
+    compression="zlib",
+):
+    """
+    Post-process per-timepoint mask TIFFs into a 4D-consistent labeling.
+
+    Reads timepoint masks from `input_folder`, stitches IDs across adjacent
+    timepoints, and writes stitched masks to `output_folder`.
+    """
+    in_folder = os.path.abspath(os.path.expanduser(str(input_folder)))
+    if not os.path.isdir(in_folder):
+        raise ValueError(f"input folder does not exist: {in_folder}")
+
+    time_map = _collect_timepoint_mask_files(in_folder)
+    if len(time_map) == 0:
+        raise ValueError(f"no readable timepoint mask TIFFs found in {in_folder}")
+
+    if output_folder is None or str(output_folder).strip() == "":
+        out_folder = _default_4d_stitched_folder_from_mask_folder(in_folder)
+    else:
+        out_folder = os.path.abspath(os.path.expanduser(str(output_folder)))
+    os.makedirs(out_folder, exist_ok=True)
+
+    ordered = sorted(time_map.items(), key=lambda kv: int(kv[0]))
+    threshold = _clamp_stitch_threshold(stitch_threshold, default=0.25)
+
+    prev_stitched = None
+    next_label = 1
+    target_shape = None
+    max_label_seen = 0
+    written = {}
+
+    for t, mask_path in ordered:
+        arr = _as_zyx_mask(tifffile.imread(mask_path))
+        if target_shape is None:
+            target_shape = tuple(arr.shape)
+        elif strict_shape and tuple(arr.shape) != target_shape:
+            raise ValueError(
+                f"shape mismatch for T={t}: expected {target_shape}, got {arr.shape} in {mask_path}"
+            )
+
+        if bool(stitch_over_z):
+            arr = _stitch_masks_over_z_for_volume(arr, stitch_threshold=threshold)
+
+        stitched_t, next_label = _stitch_masks_over_time_with_state(
+            arr,
+            prev_stitched,
+            next_label,
+            stitch_threshold=threshold,
+            time_index=t,
+        )
+        prev_stitched = stitched_t.copy()
+        if stitched_t.size > 0:
+            try:
+                max_label_seen = max(max_label_seen, int(stitched_t.max()))
+            except Exception:
+                pass
+
+        out_path = os.path.join(out_folder, f"masks_T{int(t):04d}_ZYX.tif")
+        out_dtype = _label_dtype_for_masks(stitched_t)
+        tifffile.imwrite(
+            out_path,
+            np.asarray(stitched_t, dtype=out_dtype),
+            compression=compression,
+            metadata={"axes": "ZYX"},
+        )
+        written[int(t)] = out_path
+        print(
+            f"GUI_INFO: stitched T={int(t)} -> {out_path} "
+            f"(dtype={np.dtype(out_dtype).name})"
+        )
+
+    return out_folder, written, max_label_seen
+
+
 def _save_timepoint_mask_tiff(
     parent,
     time_index,
     masks=None,
     *,
     base=None,
+    output_folder=None,
+    cache_as_stitched=False,
     label_dtype=None,
     compression="zlib",
     verbose=True,
 ):
     """
-    Save one labeled mask TIFF for a single timepoint to `*_cp_masks_by_time`.
+    Save one labeled mask TIFF for a single timepoint.
+
+    By default this writes to `*_cp_masks_by_time`. If `output_folder` is
+    provided, it writes there instead.
     Returns the written file path.
     """
     try:
@@ -1006,7 +1240,10 @@ def _save_timepoint_mask_tiff(
             out_dtype, copy=False
         )
 
-    out_dir = base + "_cp_masks_by_time"
+    if output_folder is None or str(output_folder).strip() == "":
+        out_dir = base + "_cp_masks_by_time"
+    else:
+        out_dir = os.path.abspath(os.path.expanduser(str(output_folder)))
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(out_dir, f"masks_T{t:04d}_ZYX.tif")
     tifffile.imwrite(
@@ -1018,13 +1255,33 @@ def _save_timepoint_mask_tiff(
 
     # keep folder cache fresh for quick by-time loading
     try:
-        parent._time_mask_base = base
-        parent._time_mask_folder = out_dir
-        parent._time_mask_folder_mtime = os.path.getmtime(out_dir)
-        if not isinstance(getattr(parent, "_time_mask_file_map", None), dict):
-            parent._time_mask_file_map = {}
-        parent._time_mask_file_map[t] = out_path
-        parent.available_mask_timepoints = sorted(parent._time_mask_file_map.keys())
+        folder_name = os.path.basename(os.path.normpath(out_dir)).lower()
+        stitched_folder_name = (
+            folder_name.endswith("_cp_masks_4d_by_time")
+            or folder_name.endswith("_masks_4d_by_time")
+            or folder_name.endswith("_cp_masks_by_time_4d")
+            or folder_name.endswith("_by_time_4d")
+        )
+        use_stitched_cache = bool(cache_as_stitched) or stitched_folder_name
+        cache_suffix = "_4d" if use_stitched_cache else ""
+        avail_key = (
+            "available_mask_timepoints_4d"
+            if use_stitched_cache
+            else "available_mask_timepoints"
+        )
+        base_key = f"_time_mask_base{cache_suffix}"
+        folder_key = f"_time_mask_folder{cache_suffix}"
+        mtime_key = f"_time_mask_folder_mtime{cache_suffix}"
+        map_key = f"_time_mask_file_map{cache_suffix}"
+
+        setattr(parent, base_key, base)
+        setattr(parent, folder_key, out_dir)
+        setattr(parent, mtime_key, os.path.getmtime(out_dir))
+        if not isinstance(getattr(parent, map_key, None), dict):
+            setattr(parent, map_key, {})
+        mask_map = getattr(parent, map_key)
+        mask_map[t] = out_path
+        setattr(parent, avail_key, sorted(mask_map.keys()))
     except Exception:
         pass
 
@@ -1080,12 +1337,19 @@ def _collect_timepoint_mask_files(folder):
     return time_map
 
 
-def _get_timepoint_mask_map_for_base(parent, base):
+def _get_timepoint_mask_map_for_base(parent, base, prefer_stitched=False):
     """
     Return (folder, {time_index: tif_path}) for by-time mask folders near `base`.
     Uses a lightweight folder-mtime cache on the GUI parent.
     """
-    candidates = [base + "_cp_masks_by_time", base + "_masks_by_time"]
+    if prefer_stitched:
+        candidates = [
+            base + "_cp_masks_4d_by_time",
+            base + "_masks_4d_by_time",
+            base + "_cp_masks_by_time_4d",
+        ]
+    else:
+        candidates = [base + "_cp_masks_by_time", base + "_masks_by_time"]
     folder = next((d for d in candidates if os.path.isdir(d)), None)
     if folder is None:
         return None, {}
@@ -1095,10 +1359,21 @@ def _get_timepoint_mask_map_for_base(parent, base):
     except Exception:
         folder_mtime = None
 
-    cache_base = getattr(parent, "_time_mask_base", None)
-    cache_folder = getattr(parent, "_time_mask_folder", None)
-    cache_mtime = getattr(parent, "_time_mask_folder_mtime", None)
-    cache_map = getattr(parent, "_time_mask_file_map", None)
+    cache_suffix = "_4d" if bool(prefer_stitched) else ""
+    cache_base_key = f"_time_mask_base{cache_suffix}"
+    cache_folder_key = f"_time_mask_folder{cache_suffix}"
+    cache_mtime_key = f"_time_mask_folder_mtime{cache_suffix}"
+    cache_map_key = f"_time_mask_file_map{cache_suffix}"
+    avail_key = (
+        "available_mask_timepoints_4d"
+        if bool(prefer_stitched)
+        else "available_mask_timepoints"
+    )
+
+    cache_base = getattr(parent, cache_base_key, None)
+    cache_folder = getattr(parent, cache_folder_key, None)
+    cache_mtime = getattr(parent, cache_mtime_key, None)
+    cache_map = getattr(parent, cache_map_key, None)
 
     if (
         cache_base == base
@@ -1109,12 +1384,12 @@ def _get_timepoint_mask_map_for_base(parent, base):
         return folder, cache_map
 
     time_map = _collect_timepoint_mask_files(folder)
-    parent._time_mask_base = base
-    parent._time_mask_folder = folder
-    parent._time_mask_folder_mtime = folder_mtime
-    parent._time_mask_file_map = time_map
+    setattr(parent, cache_base_key, base)
+    setattr(parent, cache_folder_key, folder)
+    setattr(parent, cache_mtime_key, folder_mtime)
+    setattr(parent, cache_map_key, time_map)
     try:
-        parent.available_mask_timepoints = sorted(time_map.keys())
+        setattr(parent, avail_key, sorted(time_map.keys()))
     except Exception:
         pass
     if len(time_map) > 0:
@@ -1124,12 +1399,14 @@ def _get_timepoint_mask_map_for_base(parent, base):
     return folder, time_map
 
 
-def _load_timepoint_mask_from_by_time(parent, base, t_index):
+def _load_timepoint_mask_from_by_time(parent, base, t_index, prefer_stitched=False):
     """
     Load masks for a specific timepoint from *_cp_masks_by_time folder if available.
     Returns True if loaded, else False.
     """
-    folder, time_map = _get_timepoint_mask_map_for_base(parent, base)
+    folder, time_map = _get_timepoint_mask_map_for_base(
+        parent, base, prefer_stitched=bool(prefer_stitched)
+    )
     if folder is None or len(time_map) == 0:
         return False
     try:
@@ -1142,17 +1419,36 @@ def _load_timepoint_mask_from_by_time(parent, base, t_index):
     mask_path = time_map[t]
     try:
         masks = _as_zyx_mask(tifffile.imread(mask_path))
-        _masks_to_gui(parent, masks, outlines=None, colors=None)
-        if not isinstance(getattr(parent, "seg_time_data", None), dict):
-            parent.seg_time_data = {}
-        parent.seg_time_data[t] = {
-            "masks": masks.copy(),
-            "outlines": None,
-            "colors": None,
-            "time_index": t,
-            "axes": "ZYX",
-            "preserve_labels": False,
-        }
+        keep_ids = bool(prefer_stitched)
+        _masks_to_gui(
+            parent,
+            masks,
+            outlines=None,
+            colors=None,
+            preserve_labels=keep_ids,
+        )
+        if keep_ids:
+            if not isinstance(getattr(parent, "seg_time_data_4d", None), dict):
+                parent.seg_time_data_4d = {}
+            parent.seg_time_data_4d[t] = {
+                "masks": masks.copy(),
+                "outlines": None,
+                "colors": None,
+                "time_index": t,
+                "axes": "ZYX",
+                "preserve_labels": True,
+            }
+        else:
+            if not isinstance(getattr(parent, "seg_time_data", None), dict):
+                parent.seg_time_data = {}
+            parent.seg_time_data[t] = {
+                "masks": masks.copy(),
+                "outlines": None,
+                "colors": None,
+                "time_index": t,
+                "axes": "ZYX",
+                "preserve_labels": False,
+            }
         print(
             f"GUI_INFO: loaded timepoint mask T={t} from by-time folder file {os.path.basename(mask_path)}"
         )
@@ -1334,6 +1630,128 @@ def _build_ome_from_timepoint_masks(parent):
         print(f"ERROR: failed to build OME-TIFF from folder {folder}: {e}")
 
 
+def _make_4d_stack_from_timepoint_masks(parent):
+    """
+    GUI action: stitch ROI IDs across time after segmentation has already run.
+
+    Inputs:
+      - per-timepoint mask TIFFs in *_cp_masks_by_time
+    Outputs:
+      - stitched per-timepoint TIFFs in *_cp_masks_4d_by_time
+      - combined 4D labeled OME-TIFF (TZYX) from stitched outputs
+    """
+    if not GUI:
+        print("ERROR: GUI not available for folder selection")
+        return
+    if bool(getattr(parent, "_segmentation_running", False)) or bool(
+        getattr(parent, "_segmentation_all_running", False)
+    ):
+        print("GUI_INFO: segmentation is running; wait for completion before 4D stitching")
+        return
+
+    default_in = None
+    try:
+        if hasattr(parent, "filename") and isinstance(parent.filename, str) and parent.filename:
+            base = os.path.splitext(parent.filename)[0]
+            candidate = base + "_cp_masks_by_time"
+            if os.path.isdir(candidate):
+                default_in = candidate
+    except Exception:
+        default_in = None
+
+    if default_in is not None:
+        folder = default_in
+        print(f"GUI_INFO: using default by-time mask folder {folder}")
+    else:
+        start_dir = os.getcwd()
+        if (
+            hasattr(parent, "filename")
+            and isinstance(parent.filename, str)
+            and parent.filename
+        ):
+            start_dir = os.path.dirname(parent.filename)
+        folder = QFileDialog.getExistingDirectory(
+            parent, "Select folder containing by-time mask TIFFs", start_dir
+        )
+        if not folder:
+            return
+
+    threshold = 0.25
+    try:
+        if hasattr(parent, "segmentation_settings"):
+            threshold = float(
+                getattr(parent.segmentation_settings, "time_stitch_threshold", 0.25)
+            )
+    except Exception:
+        threshold = 0.25
+    threshold = _clamp_stitch_threshold(threshold, default=0.25)
+
+    out_folder = _default_4d_stitched_folder_from_mask_folder(folder)
+    print(
+        "GUI_INFO: starting standalone 4D stitching "
+        f"(input={folder}, output={out_folder}, IOU={threshold:.3f})"
+    )
+    try:
+        out_folder, written, max_label = stitch_timepoint_masks_folder(
+            folder,
+            output_folder=out_folder,
+            stitch_threshold=threshold,
+            stitch_over_z=True,
+            strict_shape=False,
+            compression="zlib",
+        )
+        print(
+            "GUI_INFO: completed 4D stitching -> "
+            f"{len(written)} timepoints written in {out_folder} (max_label={int(max_label)})"
+        )
+    except Exception as e:
+        print(f"ERROR: failed standalone 4D stitching for folder {folder}: {e}")
+        return
+
+    try:
+        ome_out = _default_ome_output_from_mask_folder(out_folder)
+        ome_path, nt, shape, out_dtype = combine_timepoint_masks_folder_to_ome(
+            out_folder,
+            output_path=ome_out,
+            strict_shape=False,
+            compression="zlib",
+        )
+        print(
+            f"GUI_INFO: wrote stitched 4D OME-TIFF {ome_path} "
+            f"shape=(T={nt}, Z={shape[0]}, Y={shape[1]}, X={shape[2]}) "
+            f"dtype={np.dtype(out_dtype).name}"
+        )
+    except Exception as e:
+        print(
+            "GUI_WARNING: stitched by-time masks were saved, but building 4D OME-TIFF failed "
+            f"({e})"
+        )
+
+    # Refresh stitched-folder cache for the currently loaded image, if applicable.
+    try:
+        if hasattr(parent, "filename") and isinstance(parent.filename, str) and parent.filename:
+            current_base = os.path.splitext(parent.filename)[0]
+            expected = current_base + "_cp_masks_4d_by_time"
+            if os.path.normpath(out_folder) == os.path.normpath(expected):
+                folder_mtime = os.path.getmtime(out_folder)
+                time_map_4d = _collect_timepoint_mask_files(out_folder)
+                parent._time_mask_base_4d = current_base
+                parent._time_mask_folder_4d = out_folder
+                parent._time_mask_folder_mtime_4d = folder_mtime
+                parent._time_mask_file_map_4d = time_map_4d
+                parent.available_mask_timepoints_4d = sorted(time_map_4d.keys())
+    except Exception:
+        pass
+
+    # If the user requested stitched visualization, refresh current timepoint now.
+    try:
+        if bool(getattr(parent, "show_4d_stitch_view", False)):
+            if bool(getattr(parent, "loaded", False)) and bool(getattr(parent, "has_time", False)):
+                parent.set_time_index(int(getattr(parent, "currentT", 0)), force_reload=True)
+    except Exception as e:
+        print(f"GUI_WARNING: stitched-view refresh failed: {e}")
+
+
 def _save_png(parent):
     """save masks to png/tiff and, for time-lapse data, optionally one labeled OME-TIFF."""
     filename = parent.filename
@@ -1418,7 +1836,7 @@ def _save_png(parent):
                 max_label = max(max_label, int(arr.max()))
             except Exception:
                 pass
-        entries.append((t, arr))
+        entries.append((t, arr, bool(dat_t.get("preserve_labels", False))))
 
     if len(entries) == 0:
         print("GUI_INFO: no cached per-timepoint masks available for OME-TIFF export")
@@ -1429,7 +1847,7 @@ def _save_png(parent):
         nt_from_parent = int(getattr(parent, "NT", 0))
     except Exception:
         nt_from_parent = 0
-    nt = max(nt_from_parent, max(t for t, _ in entries) + 1)
+    nt = max(nt_from_parent, max(t for t, _, _ in entries) + 1)
     label_dtype = np.uint16 if max_label < 2**16 else np.uint32
 
     def _copy_to_zyx(dst, src):
@@ -1448,21 +1866,27 @@ def _save_png(parent):
 
     # Always keep per-timepoint TIFFs for time-lapse masks (useful for .sldy workflows
     # and as a robust fallback when *_seg.npy is unavailable).
-    fallback_dir = base + "_cp_masks_by_time"
-    os.makedirs(fallback_dir, exist_ok=True)
-    for t, arr in entries:
+    fallback_dirs = set()
+    for t, arr, keep_ids in entries:
+        out_dir = (
+            base + "_cp_masks_4d_by_time"
+            if keep_ids
+            else base + "_cp_masks_by_time"
+        )
+        fallback_dirs.add(out_dir)
         _save_timepoint_mask_tiff(
             parent,
             t,
             masks=arr,
             base=base,
+            output_folder=out_dir,
+            cache_as_stitched=keep_ids,
             label_dtype=label_dtype,
             compression="zlib",
             verbose=False,
         )
-    print(
-        f"GUI_INFO: saved {len(entries)} per-timepoint labeled TIFF stacks in {fallback_dir}"
-    )
+    out_dirs_text = ", ".join(sorted(fallback_dirs))
+    print(f"GUI_INFO: saved {len(entries)} per-timepoint labeled TIFF stacks in {out_dirs_text}")
 
     total_bytes = nt * nz * Ly * Lx * np.dtype(label_dtype).itemsize
     if total_bytes > 1_500_000_000:
@@ -1473,7 +1897,7 @@ def _save_png(parent):
         return
 
     labels_tzyx = np.zeros((nt, nz, Ly, Lx), dtype=label_dtype)
-    for t, arr in entries:
+    for t, arr, _keep_ids in entries:
         if 0 <= t < nt:
             _copy_to_zyx(labels_tzyx[t], arr)
 
