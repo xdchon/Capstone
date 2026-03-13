@@ -66,6 +66,7 @@ class SegmentationWorker(QtCore.QObject):
             downscale = cfg["downscale"]
             normalize_params = cfg["normalize_params"]
             z_axis = cfg["z_axis"]
+            channel_axis = cfg["channel_axis"]
 
             self.progress.emit(25)
             masks, flows = self.model.eval(
@@ -80,7 +81,7 @@ class SegmentationWorker(QtCore.QObject):
                 anisotropy=anisotropy,
                 flow3D_smooth=flow3D_smooth,
                 min_size=min_size,
-                channel_axis=-1,
+                channel_axis=channel_axis,
                 progress=None,
                 z_axis=z_axis,
             )[:2]
@@ -3181,13 +3182,22 @@ class MainW(QMainWindow):
         normalize_params = self.get_normalize_params()
         print(normalize_params)
 
-        # ensure z_axis is provided whenever images are treated as 3D,
-        # i.e. when either do_3D is True or stitch_threshold>0 (2D+stitch)
-        # and data has a depth dimension (ndim>=3).
-        if (do_3D or stitch_threshold > 0.0) and data.ndim >= 3:
+        # Cellpose expects different axis hints for true 3D stacks versus
+        # 2D slices that may be stitched back over Z.
+        if do_3D and data.ndim >= 3 and int(getattr(self, "NZ", 1)) > 1:
             z_axis = 0
         else:
             z_axis = None
+
+        if data.ndim == 4:
+            channel_axis = -1 if do_3D else None
+        elif data.ndim == 3:
+            if int(getattr(self, "NZ", 1)) > 1 and (do_3D or stitch_threshold > 0.0):
+                channel_axis = None
+            else:
+                channel_axis = -1
+        else:
+            channel_axis = None
 
         cfg = {
             "tic": tic,
@@ -3204,6 +3214,7 @@ class MainW(QMainWindow):
             "downscale": downscale,
             "normalize_params": normalize_params,
             "z_axis": z_axis,
+            "channel_axis": channel_axis,
             "time_index": seg_T,
         }
         return cfg
@@ -3233,6 +3244,7 @@ class MainW(QMainWindow):
             downscale = cfg["downscale"]
             normalize_params = cfg["normalize_params"]
             z_axis = cfg["z_axis"]
+            channel_axis = cfg["channel_axis"]
             tic = cfg["tic"]
 
             try:
@@ -3248,7 +3260,7 @@ class MainW(QMainWindow):
                     anisotropy=anisotropy,
                     flow3D_smooth=flow3D_smooth,
                     min_size=min_size,
-                    channel_axis=-1,
+                    channel_axis=channel_axis,
                     progress=self.progress,
                     z_axis=z_axis,
                 )[:2]

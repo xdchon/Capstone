@@ -34,10 +34,11 @@ Requires:
 from __future__ import annotations
 
 import argparse
+import gc
 import json
 import os
 import sys
-from typing import Iterable, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import tifffile
@@ -200,6 +201,167 @@ def choose_label_dtype(mask: np.ndarray) -> np.dtype:
     return np.uint32
 
 
+def release_cellpose_memory() -> None:
+    """
+    Prompt Python and torch to release transient inference memory.
+    """
+    gc.collect()
+    try:
+        torch_mod = getattr(cp_models, "torch", None)
+        if torch_mod is None:
+            return
+        if hasattr(torch_mod, "cuda") and torch_mod.cuda.is_available():
+            torch_mod.cuda.empty_cache()
+        mps_mod = getattr(torch_mod, "mps", None)
+        if mps_mod is not None and hasattr(mps_mod, "empty_cache"):
+            mps_mod.empty_cache()
+    except Exception:
+        # Best-effort cleanup only.
+        pass
+
+
+def segment_timepoint_stack(
+    model: cp_models.CellposeModel,
+    stack: np.ndarray,
+    args: argparse.Namespace,
+    anisotropy: Optional[float],
+    common_eval_kwargs: dict,
+    timepoint: int,
+) -> Tuple[np.ndarray, object, object, str]:
+    """
+    Segment one timepoint stack and return masks plus bookkeeping info.
+    """
+    if args.mode in ("3d", "auto"):
+        try:
+            masks_t, flows_t, styles_t = model.eval(
+                stack,
+                channel_axis=-1,
+                z_axis=0,
+                do_3D=True,
+                stitch_threshold=0.0,
+                anisotropy=anisotropy,
+                **common_eval_kwargs,
+            )
+            return masks_t, flows_t, styles_t, "3d"
+        except RuntimeError as exc:
+            if args.mode == "3d":
+                raise
+            print(
+                "3D Cellpose segmentation failed for "
+                f"timepoint {timepoint}; falling back to 2D+stitch.\n"
+                f"Error was: {exc!r}"
+            )
+            release_cellpose_memory()
+
+    masks_t, flows_t, styles_t = model.eval(
+        stack,
+        channel_axis=None,  # 4D input (Z, Y, X, C); stitch mode treats Z as image batch
+        z_axis=None,
+        do_3D=False,
+        stitch_threshold=float(args.stitch_threshold),
+        anisotropy=None,
+        **common_eval_kwargs,
+    )
+    used_mode = "2d-stitch" if args.stitch_threshold > 0 else "2d"
+    return masks_t, flows_t, styles_t, used_mode
+
+
+def ensure_position_output_dir(out_root: str, capture: int, position: int) -> str:
+    """
+    Create and return the capture/position output directory for one run.
+    """
+    os.makedirs(out_root, exist_ok=True)
+    capture_dir = os.path.join(out_root, f"capture_{capture:03d}")
+    position_dir = os.path.join(capture_dir, f"position_{position:03d}")
+    os.makedirs(position_dir, exist_ok=True)
+    return position_dir
+
+
+def save_timepoint_outputs(
+    position_dir: str,
+    tp: int,
+    masks_t: np.ndarray,
+    flows_t,
+    save_npy: bool,
+    save_ome_tiff: bool,
+    save_per_z: bool,
+    save_flows: bool,
+) -> None:
+    """
+    Save one timepoint's masks (and optionally flows) to disk.
+    """
+    if masks_t.ndim == 2:
+        masks_t = masks_t[np.newaxis, ...]
+
+    n_z, _n_y, _n_x = masks_t.shape
+    t_dir = os.path.join(position_dir, f"timepoint_{tp:04d}")
+    os.makedirs(t_dir, exist_ok=True)
+
+    if save_npy:
+        np.save(os.path.join(t_dir, f"masks_T{tp:04d}_ZYX.npy"), masks_t)
+
+    if save_ome_tiff:
+        dtype = choose_label_dtype(masks_t)
+        tifffile.imwrite(
+            os.path.join(t_dir, f"masks_T{tp:04d}_ZYX.ome.tif"),
+            masks_t.astype(dtype, copy=False),
+            dtype=dtype,
+            photometric="minisblack",
+            metadata={"axes": "ZYX"},
+            ome=True,
+        )
+
+    if save_per_z:
+        dtype = choose_label_dtype(masks_t)
+        for z in range(n_z):
+            tifffile.imwrite(
+                os.path.join(t_dir, f"mask_T{tp:04d}_Z{z:04d}.tif"),
+                masks_t[z].astype(dtype, copy=False),
+                dtype=dtype,
+                photometric="minisblack",
+            )
+
+    if save_flows and flows_t is not None:
+        np.save(os.path.join(t_dir, f"flows_T{tp:04d}.npy"), flows_t)
+
+
+def summarize_modes_by_timepoint(mode_by_timepoint: Dict[int, str]) -> str:
+    """
+    Collapse per-timepoint modes into one run-level summary string.
+    """
+    unique_modes = sorted(set(mode_by_timepoint.values()))
+    if len(unique_modes) == 1:
+        return unique_modes[0]
+    return "mixed"
+
+
+def write_segmentation_metadata(
+    position_dir: str,
+    slide_path: str,
+    capture: int,
+    position: int,
+    time_indices: Sequence[int],
+    out_root: str,
+    eval_args: dict,
+    mode_by_timepoint: Dict[int, str],
+) -> None:
+    """
+    Write a small JSON metadata summary at the capture/position level.
+    """
+    meta = {
+        "slide": slide_path,
+        "capture": int(capture),
+        "position": int(position),
+        "time_indices": list(int(t) for t in time_indices),
+        "mode_used": summarize_modes_by_timepoint(mode_by_timepoint),
+        "mode_used_by_timepoint": {str(int(tp)): mode for tp, mode in mode_by_timepoint.items()},
+        "output_root": out_root,
+        "eval_args": eval_args,
+    }
+    with open(os.path.join(position_dir, "segmentation_metadata.json"), "w", encoding="utf-8") as f:
+        json.dump(meta, f, indent=2)
+
+
 def segment_slidebook(args: argparse.Namespace) -> None:
     """
     Top-level segmentation driver.
@@ -272,66 +434,54 @@ def segment_slidebook(args: argparse.Namespace) -> None:
         compute_masks=True,
     )
 
-    masks_all: Iterable[np.ndarray]
-    flows_all: Iterable
-    styles_all: Iterable
-    used_mode: str
+    out_root = args.output_root or default_output_root(slide_path)
+    position_dir = ensure_position_output_dir(out_root, capture, position)
+    mode_by_timepoint: Dict[int, str] = {}
 
-    # Try 3D segmentation first if requested/allowed.
-    if args.mode in ("3d", "auto"):
-        try:
-            masks_all, flows_all, styles_all = model.eval(
-                source,
-                channel_axis=-1,  # last axis is channels in get_time_stack
-                z_axis=0,  # first axis is Z in get_time_stack
-                do_3D=True,
-                stitch_threshold=0.0,
-                anisotropy=anisotropy,
-                **common_eval_kwargs,
-            )
-            used_mode = "3d"
-        except RuntimeError as exc:
-            if args.mode == "3d":
-                raise
-            print(
-                "3D Cellpose segmentation failed, falling back to 2D+stitch.\n"
-                f"Error was: {exc!r}"
-            )
-            masks_all = flows_all = styles_all = ()
-            used_mode = "auto-fallback"
-    else:
-        masks_all = flows_all = styles_all = ()
-        used_mode = "2d"
-
-    # If 3D failed or was not attempted, run 2D + optional stitching.
-    if not masks_all:
-        masks_all, flows_all, styles_all = model.eval(
-            source,
-            channel_axis=None,  # 4D input (Z, Y, X, C), channels last
-            z_axis=None,
-            do_3D=False,
-            stitch_threshold=float(args.stitch_threshold),
-            anisotropy=None,
-            **common_eval_kwargs,
+    for logical_t_index, tp in enumerate(source.time_indices):
+        print(
+            "Segmenting timepoint "
+            f"{tp} ({logical_t_index + 1}/{len(source.time_indices)})"
         )
-        used_mode = "2d-stitch" if args.stitch_threshold > 0 else "2d"
+        stack_t = source.get_time_stack(logical_t_index)
+        masks_t = flows_t = styles_t = None
+        try:
+            masks_t, flows_t, styles_t, used_mode = segment_timepoint_stack(
+                model=model,
+                stack=stack_t,
+                args=args,
+                anisotropy=anisotropy,
+                common_eval_kwargs=common_eval_kwargs,
+                timepoint=int(tp),
+            )
+            mode_by_timepoint[int(tp)] = used_mode
+            save_timepoint_outputs(
+                position_dir=position_dir,
+                tp=int(tp),
+                masks_t=np.asarray(masks_t),
+                flows_t=flows_t,
+                save_npy=bool(args.save_npy),
+                save_ome_tiff=bool(args.save_ome_tiff),
+                save_per_z=bool(args.save_per_z),
+                save_flows=bool(args.save_flows),
+            )
+            print(f"Finished timepoint {tp} with mode={used_mode}")
+        finally:
+            del stack_t
+            del masks_t
+            del flows_t
+            del styles_t
+            release_cellpose_memory()
 
-    save_outputs(
+    write_segmentation_metadata(
+        position_dir=position_dir,
         slide_path=slide_path,
         capture=capture,
         position=position,
         time_indices=source.time_indices,
-        masks_all=list(masks_all),
-        flows_all=list(flows_all),
-        mode_used=used_mode,
-        out_root=args.output_root or default_output_root(slide_path),
-        save_npy=bool(args.save_npy),
-        save_ome_tiff=bool(args.save_ome_tiff),
-        save_per_z=bool(args.save_per_z),
-        save_flows=bool(args.save_flows),
+        out_root=out_root,
         eval_args=dict(
             mode=args.mode,
-            used_mode=used_mode,
             channels=list(source.channels),
             normalize=normalize_param,
             anisotropy=anisotropy,
@@ -342,81 +492,8 @@ def segment_slidebook(args: argparse.Namespace) -> None:
             min_size=int(args.min_size),
             stitch_threshold=float(args.stitch_threshold),
         ),
+        mode_by_timepoint=mode_by_timepoint,
     )
-
-
-def save_outputs(
-    slide_path: str,
-    capture: int,
-    position: int,
-    time_indices: Sequence[int],
-    masks_all: List[np.ndarray],
-    flows_all,
-    mode_used: str,
-    out_root: str,
-    save_npy: bool,
-    save_ome_tiff: bool,
-    save_per_z: bool,
-    save_flows: bool,
-    eval_args: dict,
-) -> None:
-    """
-    Save masks (and optionally flows) to disk in several formats.
-    """
-    os.makedirs(out_root, exist_ok=True)
-    capture_dir = os.path.join(out_root, f"capture_{capture:03d}")
-    position_dir = os.path.join(capture_dir, f"position_{position:03d}")
-    os.makedirs(position_dir, exist_ok=True)
-
-    for idx, (tp, masks_t) in enumerate(zip(time_indices, masks_all)):
-        if masks_t.ndim == 2:
-            masks_t = masks_t[np.newaxis, ...]
-
-        n_z, n_y, n_x = masks_t.shape
-        t_dir = os.path.join(position_dir, f"timepoint_{tp:04d}")
-        os.makedirs(t_dir, exist_ok=True)
-
-        if save_npy:
-            np.save(os.path.join(t_dir, f"masks_T{tp:04d}_ZYX.npy"), masks_t)
-
-        if save_ome_tiff:
-            dtype = choose_label_dtype(masks_t)
-            tifffile.imwrite(
-                os.path.join(t_dir, f"masks_T{tp:04d}_ZYX.ome.tif"),
-                masks_t.astype(dtype, copy=False),
-                dtype=dtype,
-                photometric="minisblack",
-                metadata={"axes": "ZYX"},
-                ome=True,
-            )
-
-        if save_per_z:
-            dtype = choose_label_dtype(masks_t)
-            for z in range(n_z):
-                tifffile.imwrite(
-                    os.path.join(t_dir, f"mask_T{tp:04d}_Z{z:04d}.tif"),
-                    masks_t[z].astype(dtype, copy=False),
-                    dtype=dtype,
-                    photometric="minisblack",
-                )
-
-        if save_flows and flows_all:
-            # Cellpose returns a list of flow fields per timepoint.
-            flows_t = flows_all[idx]
-            np.save(os.path.join(t_dir, f"flows_T{tp:04d}.npy"), flows_t)
-
-    # Write a small JSON metadata summary at the capture/position level.
-    meta = {
-        "slide": slide_path,
-        "capture": int(capture),
-        "position": int(position),
-        "time_indices": list(int(t) for t in time_indices),
-        "mode_used": mode_used,
-        "output_root": out_root,
-        "eval_args": eval_args,
-    }
-    with open(os.path.join(position_dir, "segmentation_metadata.json"), "w", encoding="utf-8") as f:
-        json.dump(meta, f, indent=2)
 
 
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
@@ -583,4 +660,3 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
 
 if __name__ == "__main__":  # pragma: no cover
     main()
-
