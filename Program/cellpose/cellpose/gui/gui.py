@@ -1602,6 +1602,7 @@ class MainW(QMainWindow):
         self._current_seg_preserve_labels = False
         self._seg_all_total = 0
         self._seg_all_current_t = None
+        self._seg_all_cached_results = None
         self._reset_time_tracking_state()
         self._time_mask_base = None
         self._time_mask_folder = None
@@ -2621,6 +2622,7 @@ class MainW(QMainWindow):
         self._seg_all_selected_timepoints = ()
         self._seg_all_time_tracking_enabled = False
         self._seg_all_tracking_max_distance = None
+        self._seg_all_cached_results = None
 
     @staticmethod
     def _compact_positive_labels(labels):
@@ -2744,6 +2746,17 @@ class MainW(QMainWindow):
                 "axes": "ZYX" if masks_arr.ndim == 3 else "YX",
                 "preserve_labels": bool(preserve_labels),
             }
+            if self._segmentation_all_running:
+                if not isinstance(self._seg_all_cached_results, dict):
+                    self._seg_all_cached_results = {}
+                self._seg_all_cached_results[t] = {
+                    "masks": masks_arr.copy(),
+                    "outlines": None,
+                    "colors": None,
+                    "time_index": t,
+                    "axes": "ZYX" if masks_arr.ndim == 3 else "YX",
+                    "preserve_labels": bool(preserve_labels),
+                }
         except Exception as e:
             print(f"ERROR: could not cache segmentation for T={time_index}: {e}")
 
@@ -2770,7 +2783,9 @@ class MainW(QMainWindow):
         if not getattr(self, "_seg_all_time_tracking_enabled", False):
             return
 
-        per_time = getattr(self, "seg_time_data", None)
+        per_time = getattr(self, "_seg_all_cached_results", None)
+        if not isinstance(per_time, dict) or len(per_time) == 0:
+            per_time = getattr(self, "seg_time_data", None)
         if not isinstance(per_time, dict) or len(per_time) == 0:
             print("GUI_WARNING: no cached timepoints available for Ultrack tracking")
             return
@@ -2915,6 +2930,7 @@ class MainW(QMainWindow):
         )
         self._reset_time_tracking_state()
         self._seg_all_selected_timepoints = tuple(selected_timepoints)
+        self._seg_all_cached_results = {}
         try:
             self._seg_all_time_tracking_enabled = bool(
                 getattr(self.segmentation_settings, "track_over_time", False)
@@ -2923,6 +2939,13 @@ class MainW(QMainWindow):
                 getattr(self.segmentation_settings, "tracking_max_distance", 15.0)
             )
         except Exception:
+            self._seg_all_time_tracking_enabled = False
+            self._seg_all_tracking_max_distance = None
+        if self._seg_all_time_tracking_enabled and len(selected_timepoints) < 2:
+            print(
+                "GUI_INFO: Ultrack tracking needs at least two timepoints; "
+                "continuing with segmentation only"
+            )
             self._seg_all_time_tracking_enabled = False
             self._seg_all_tracking_max_distance = None
         if self._seg_all_time_tracking_enabled:
@@ -2961,7 +2984,7 @@ class MainW(QMainWindow):
             try:
                 t_restore = int(getattr(self, "_seg_all_original_T", 0))
                 if getattr(self, "has_time", False) and int(getattr(self, "NT", 1)) > 1:
-                    self.set_time_index(t_restore)
+                    self.set_time_index(t_restore, force_reload=True)
             except Exception as e:
                 print(f"ERROR: could not restore original timepoint after all-time run: {e}")
             return
@@ -2978,11 +3001,25 @@ class MainW(QMainWindow):
         self._seg_all_first = False
 
         if self._seg_all_custom:
-            self.start_segmentation_async(custom=True, load_model=load_model, time_index=t)
+            self.start_segmentation_async(
+                custom=True,
+                load_model=load_model,
+                time_index=t,
+            )
         else:
             self.start_segmentation_async(
-                model_name=self._seg_all_model_name, load_model=load_model, time_index=t
+                model_name=self._seg_all_model_name,
+                load_model=load_model,
+                time_index=t,
             )
+
+        if not self._segmentation_running:
+            print(
+                f"GUI_WARNING: segmentation did not launch for T={t}; "
+                "skipping to the next timepoint"
+            )
+            self._seg_all_current_t = None
+            QtCore.QTimer.singleShot(0, self._segmentation_all_next)
 
 
     def _prepare_segmentation_inputs(self, custom=False, model_name=None, load_model=True, time_index=None):
@@ -2998,11 +3035,16 @@ class MainW(QMainWindow):
                 seg_T = None
 
         should_clear_view = True
+        if self._segmentation_all_running:
+            should_clear_view = False
         if seg_T is not None:
             try:
-                should_clear_view = int(getattr(self, "currentT", 0)) == int(seg_T)
+                should_clear_view = (
+                    not self._segmentation_all_running
+                    and int(getattr(self, "currentT", 0)) == int(seg_T)
+                )
             except Exception:
-                should_clear_view = True
+                should_clear_view = not self._segmentation_all_running
         if should_clear_view:
             self.clear_all()
             self.flows = [[], [], []]
@@ -3270,6 +3312,7 @@ class MainW(QMainWindow):
                 pass
 
     def _on_segmentation_finished(self, result):
+        is_batch_run = False
         try:
             masks = result.get("masks", None)
             flows_display = result.get("flows", None)
@@ -3277,12 +3320,16 @@ class MainW(QMainWindow):
             elapsed = result.get("elapsed", None)
             seg_time_index = result.get("time_index", None)
             preserve_labels = False
+            is_batch_run = bool(
+                self._segmentation_all_running and seg_time_index is not None
+            )
             if masks is None or flows_display is None:
                 print("ERROR: segmentation worker returned no results")
                 self.progress.setValue(0)
                 return
 
-            self.flows = flows_display
+            if not is_batch_run:
+                self.flows = flows_display
             n_cells = len(np.unique(masks)[1:])
             if elapsed is not None:
                 self.logger.info(
@@ -3295,7 +3342,7 @@ class MainW(QMainWindow):
                 masks, seg_time_index, preserve_labels=preserve_labels
             )
             self._current_seg_preserve_labels = bool(preserve_labels)
-            if self._segmentation_all_running and seg_time_index is not None:
+            if is_batch_run:
                 try:
                     base = os.path.splitext(self.filename)[0]
                     save_dir = (
@@ -3326,14 +3373,17 @@ class MainW(QMainWindow):
                 and not self.disableAutosave.isChecked()
             )
             should_switch_view = (
-                seg_time_index is not None
-                and (self._segmentation_all_running or autosave_enabled)
+                (not is_batch_run)
+                and seg_time_index is not None
+                and autosave_enabled
                 and current_T != seg_time_index
             )
 
             if should_switch_view:
                 self.set_time_index(seg_time_index)
-            elif seg_time_index is None or current_T == seg_time_index:
+            elif (not is_batch_run) and (
+                seg_time_index is None or current_T == seg_time_index
+            ):
                 io._masks_to_gui(
                     self, masks, outlines=None, preserve_labels=preserve_labels
                 )
@@ -3341,7 +3391,7 @@ class MainW(QMainWindow):
                 if hasattr(self, "MCheckBox"):
                     self.MCheckBox.setChecked(True)
 
-            if self._segmentation_all_running and seg_time_index is not None:
+            if is_batch_run:
                 done_n = int(getattr(self, "_seg_all_total", 0)) - len(
                     getattr(self, "_seg_all_queue", [])
                 )
@@ -3351,6 +3401,8 @@ class MainW(QMainWindow):
             self.progress.setValue(100)
             self.recompute_masks = recompute_masks
             if (
+                not is_batch_run
+                and
                 self.restore != "filter"
                 and self.restore is not None
                 and self.autobtn.isChecked()
@@ -3361,10 +3413,11 @@ class MainW(QMainWindow):
             self.progress.setValue(0)
         else:
             # autosave segmentation (including aggregated time-lapse seg) if enabled
-            try:
-                io._save_sets_with_check(self)
-            except Exception as e:
-                print(f"ERROR: could not autosave segmentation: {e}")
+            if not is_batch_run:
+                try:
+                    io._save_sets_with_check(self)
+                except Exception as e:
+                    print(f"ERROR: could not autosave segmentation: {e}")
 
     def _on_segmentation_thread_finished(self):
         self._segmentation_running = False
