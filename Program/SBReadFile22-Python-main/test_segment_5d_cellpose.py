@@ -131,6 +131,9 @@ def test_segment_slidebook_falls_back_per_timepoint(monkeypatch, tmp_path):
         (10, False),
         (20, True),
     ]
+    fallback_call = fake_model.calls[2]
+    assert fallback_call["channel_axis"] == -1
+    assert fallback_call["z_axis"] == 0
 
     position_dir = tmp_path / "out" / "capture_000" / "position_000"
     meta = json.loads((position_dir / "segmentation_metadata.json").read_text(encoding="utf-8"))
@@ -157,6 +160,8 @@ class StreamingModel:
                 "is_ndarray": isinstance(stack, np.ndarray),
                 "time_marker": time_marker,
                 "do_3D": bool(kwargs["do_3D"]),
+                "channel_axis": kwargs.get("channel_axis"),
+                "z_axis": kwargs.get("z_axis"),
             }
         )
         label = time_marker // 10 + 1
@@ -175,6 +180,8 @@ class FallbackOnSecondTimepointModel(StreamingModel):
                 "is_ndarray": isinstance(stack, np.ndarray),
                 "time_marker": time_marker,
                 "do_3D": bool(kwargs["do_3D"]),
+                "channel_axis": kwargs.get("channel_axis"),
+                "z_axis": kwargs.get("z_axis"),
             }
         )
         if time_marker == 10 and kwargs["do_3D"]:

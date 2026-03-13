@@ -67,24 +67,65 @@ class SegmentationWorker(QtCore.QObject):
             normalize_params = cfg["normalize_params"]
             z_axis = cfg["z_axis"]
             channel_axis = cfg["channel_axis"]
+            fallback_stitch_threshold = cfg.get(
+                "fallback_stitch_threshold", stitch_threshold
+            )
 
             self.progress.emit(25)
-            masks, flows = self.model.eval(
-                data,
-                diameter=diameter,
-                cellprob_threshold=cellprob_threshold,
-                flow_threshold=flow_threshold,
-                do_3D=do_3D,
-                niter=niter,
-                normalize=normalize_params,
-                stitch_threshold=stitch_threshold,
-                anisotropy=anisotropy,
-                flow3D_smooth=flow3D_smooth,
-                min_size=min_size,
-                channel_axis=channel_axis,
-                progress=None,
-                z_axis=z_axis,
-            )[:2]
+            eval_do_3d = bool(do_3D)
+            eval_stitch_threshold = float(stitch_threshold)
+            eval_anisotropy = anisotropy
+            try:
+                masks, flows = self.model.eval(
+                    data,
+                    diameter=diameter,
+                    cellprob_threshold=cellprob_threshold,
+                    flow_threshold=flow_threshold,
+                    do_3D=eval_do_3d,
+                    niter=niter,
+                    normalize=normalize_params,
+                    stitch_threshold=eval_stitch_threshold,
+                    anisotropy=eval_anisotropy,
+                    flow3D_smooth=flow3D_smooth,
+                    min_size=min_size,
+                    channel_axis=channel_axis,
+                    progress=None,
+                    z_axis=z_axis,
+                )[:2]
+            except RuntimeError as e:
+                if not eval_do_3d:
+                    raise
+
+                # If 3D fails (commonly GPU/CPU OOM), retry as 2D to keep
+                # long timepoint runs moving instead of aborting.
+                try:
+                    fallback_stitch = float(fallback_stitch_threshold)
+                except Exception:
+                    fallback_stitch = 0.0
+                fallback_stitch = max(0.0, min(1.0, fallback_stitch))
+                eval_do_3d = False
+                eval_stitch_threshold = fallback_stitch
+                eval_anisotropy = None
+                print(
+                    "GUI_WARNING: 3D segmentation failed; retrying in 2D mode "
+                    f"(stitch_threshold={eval_stitch_threshold:.3f}). Error: {e}"
+                )
+                masks, flows = self.model.eval(
+                    data,
+                    diameter=diameter,
+                    cellprob_threshold=cellprob_threshold,
+                    flow_threshold=flow_threshold,
+                    do_3D=eval_do_3d,
+                    niter=niter,
+                    normalize=normalize_params,
+                    stitch_threshold=eval_stitch_threshold,
+                    anisotropy=eval_anisotropy,
+                    flow3D_smooth=flow3D_smooth,
+                    min_size=min_size,
+                    channel_axis=channel_axis,
+                    progress=None,
+                    z_axis=z_axis,
+                )[:2]
 
             self.progress.emit(60)
 
@@ -92,8 +133,8 @@ class SegmentationWorker(QtCore.QObject):
                 masks,
                 flows,
                 load_3D=geom["load_3D"],
-                do_3D=do_3D,
-                stitch_threshold=stitch_threshold,
+                do_3D=eval_do_3d,
+                stitch_threshold=eval_stitch_threshold,
                 downscale=downscale,
                 Ly=geom["Ly"],
                 Lx=geom["Lx"],
@@ -110,8 +151,8 @@ class SegmentationWorker(QtCore.QObject):
                 "masks": masks,
                 "flows": flows_display,
                 "recompute_masks": recompute_masks,
-                "do_3D": do_3D,
-                "stitch_threshold": stitch_threshold,
+                "do_3D": eval_do_3d,
+                "stitch_threshold": eval_stitch_threshold,
                 "downscale": downscale,
                 "elapsed": elapsed,
                 "time_index": cfg.get("time_index", None),
@@ -2802,10 +2843,15 @@ class MainW(QMainWindow):
             return
         try:
             t = int(time_index)
-            if not isinstance(self.seg_time_data, dict):
-                self.seg_time_data = {}
             masks_arr = np.asarray(masks)
-            self.seg_time_data[t] = {
+            is_batch_run = bool(self._segmentation_all_running)
+            tracking_enabled = bool(
+                getattr(self, "_seg_all_time_tracking_enabled", False)
+            )
+            cache_for_tracking = is_batch_run and tracking_enabled
+            cache_for_browsing = (not is_batch_run) or (not tracking_enabled)
+
+            entry = {
                 "masks": masks_arr.copy(),
                 "outlines": None,
                 "colors": None,
@@ -2813,17 +2859,17 @@ class MainW(QMainWindow):
                 "axes": "ZYX" if masks_arr.ndim == 3 else "YX",
                 "preserve_labels": bool(preserve_labels),
             }
-            if self._segmentation_all_running:
+
+            if cache_for_browsing:
+                if not isinstance(self.seg_time_data, dict):
+                    self.seg_time_data = {}
+                self.seg_time_data[t] = entry
+
+            if cache_for_tracking:
                 if not isinstance(self._seg_all_cached_results, dict):
                     self._seg_all_cached_results = {}
-                self._seg_all_cached_results[t] = {
-                    "masks": masks_arr.copy(),
-                    "outlines": None,
-                    "colors": None,
-                    "time_index": t,
-                    "axes": "ZYX" if masks_arr.ndim == 3 else "YX",
-                    "preserve_labels": bool(preserve_labels),
-                }
+                # Reuse one object so large 3D masks are not duplicated in RAM.
+                self._seg_all_cached_results[t] = entry
         except Exception as e:
             print(f"ERROR: could not cache segmentation for T={time_index}: {e}")
 
@@ -3163,6 +3209,7 @@ class MainW(QMainWindow):
         downscale = getattr(self.segmentation_settings, "downscale_factor", 1.0)
 
         do_3D = False if stitch_threshold > 0.0 else do_3D
+        fallback_stitch_threshold = stitch_threshold if stitch_threshold > 0.0 else 0.0
 
         # choose segmentation data
         # Always pick data by explicit time index (seg_T) to decouple from GUI slider.
@@ -3243,6 +3290,7 @@ class MainW(QMainWindow):
             "normalize_params": normalize_params,
             "z_axis": z_axis,
             "channel_axis": channel_axis,
+            "fallback_stitch_threshold": fallback_stitch_threshold,
             "time_index": seg_T,
         }
         return cfg
@@ -3273,25 +3321,63 @@ class MainW(QMainWindow):
             normalize_params = cfg["normalize_params"]
             z_axis = cfg["z_axis"]
             channel_axis = cfg["channel_axis"]
+            fallback_stitch_threshold = cfg.get(
+                "fallback_stitch_threshold", stitch_threshold
+            )
             tic = cfg["tic"]
 
             try:
-                masks, flows = self.model.eval(
-                    data,
-                    diameter=diameter,
-                    cellprob_threshold=cellprob_threshold,
-                    flow_threshold=flow_threshold,
-                    do_3D=do_3D,
-                    niter=niter,
-                    normalize=normalize_params,
-                    stitch_threshold=stitch_threshold,
-                    anisotropy=anisotropy,
-                    flow3D_smooth=flow3D_smooth,
-                    min_size=min_size,
-                    channel_axis=channel_axis,
-                    progress=self.progress,
-                    z_axis=z_axis,
-                )[:2]
+                eval_do_3d = bool(do_3D)
+                eval_stitch_threshold = float(stitch_threshold)
+                eval_anisotropy = anisotropy
+                try:
+                    masks, flows = self.model.eval(
+                        data,
+                        diameter=diameter,
+                        cellprob_threshold=cellprob_threshold,
+                        flow_threshold=flow_threshold,
+                        do_3D=eval_do_3d,
+                        niter=niter,
+                        normalize=normalize_params,
+                        stitch_threshold=eval_stitch_threshold,
+                        anisotropy=eval_anisotropy,
+                        flow3D_smooth=flow3D_smooth,
+                        min_size=min_size,
+                        channel_axis=channel_axis,
+                        progress=self.progress,
+                        z_axis=z_axis,
+                    )[:2]
+                except RuntimeError as e:
+                    if not eval_do_3d:
+                        raise
+                    try:
+                        fallback_stitch = float(fallback_stitch_threshold)
+                    except Exception:
+                        fallback_stitch = 0.0
+                    fallback_stitch = max(0.0, min(1.0, fallback_stitch))
+                    eval_do_3d = False
+                    eval_stitch_threshold = fallback_stitch
+                    eval_anisotropy = None
+                    print(
+                        "GUI_WARNING: 3D segmentation failed; retrying in 2D mode "
+                        f"(stitch_threshold={eval_stitch_threshold:.3f}). Error: {e}"
+                    )
+                    masks, flows = self.model.eval(
+                        data,
+                        diameter=diameter,
+                        cellprob_threshold=cellprob_threshold,
+                        flow_threshold=flow_threshold,
+                        do_3D=eval_do_3d,
+                        niter=niter,
+                        normalize=normalize_params,
+                        stitch_threshold=eval_stitch_threshold,
+                        anisotropy=eval_anisotropy,
+                        flow3D_smooth=flow3D_smooth,
+                        min_size=min_size,
+                        channel_axis=channel_axis,
+                        progress=self.progress,
+                        z_axis=z_axis,
+                    )[:2]
             except Exception as e:
                 print("NET ERROR: %s" % e)
                 self.progress.setValue(0)
@@ -3303,8 +3389,8 @@ class MainW(QMainWindow):
                 masks,
                 flows,
                 load_3D=self.load_3D,
-                do_3D=do_3D,
-                stitch_threshold=stitch_threshold,
+                do_3D=eval_do_3d,
+                stitch_threshold=eval_stitch_threshold,
                 downscale=downscale,
                 Ly=self.Ly,
                 Lx=self.Lx,

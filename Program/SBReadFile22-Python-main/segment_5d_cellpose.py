@@ -255,8 +255,10 @@ def segment_timepoint_stack(
 
     masks_t, flows_t, styles_t = model.eval(
         stack,
-        channel_axis=None,  # 4D input (Z, Y, X, C); stitch mode treats Z as image batch
-        z_axis=None,
+        # For 2D/2D+stitch with 4D ZYXC input, keep explicit axes so Cellpose
+        # can correctly convert the stack layout before running per-slice dynamics.
+        channel_axis=-1,
+        z_axis=0,
         do_3D=False,
         stitch_threshold=float(args.stitch_threshold),
         anisotropy=None,
