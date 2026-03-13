@@ -11,6 +11,11 @@ from ..io import imread, imread_2D, imread_3D, imsave, outlines_to_text, add_mod
 from ..models import normalize_default, MODEL_DIR, MODEL_LIST_PATH, get_user_models
 from ..utils import masks_to_outlines, outlines_list, stitch3D
 from .. import metrics
+from ..ultrack_tracking import (
+    UltrackTrackingConfig,
+    save_tracked_masks_by_time,
+    track_labels_with_ultrack,
+)
 
 try:
     import qtpy
@@ -1186,6 +1191,65 @@ def stitch_timepoint_masks_folder(
     return out_folder, written, max_label_seen
 
 
+def track_timepoint_masks_folder_with_ultrack(
+    input_folder,
+    output_folder=None,
+    *,
+    max_distance=None,
+    strict_shape=False,
+    compression="zlib",
+):
+    """
+    Post-process per-timepoint mask TIFFs into a 4D-consistent labeling using Ultrack.
+
+    Reads timepoint masks from `input_folder`, runs Ultrack over the time series,
+    and writes tracked masks to `output_folder`.
+    """
+    in_folder = os.path.abspath(os.path.expanduser(str(input_folder)))
+    if not os.path.isdir(in_folder):
+        raise ValueError(f"input folder does not exist: {in_folder}")
+
+    time_map = _collect_timepoint_mask_files(in_folder)
+    if len(time_map) == 0:
+        raise ValueError(f"no readable timepoint mask TIFFs found in {in_folder}")
+
+    if output_folder is None or str(output_folder).strip() == "":
+        out_folder = _default_4d_stitched_folder_from_mask_folder(in_folder)
+    else:
+        out_folder = os.path.abspath(os.path.expanduser(str(output_folder)))
+    os.makedirs(out_folder, exist_ok=True)
+
+    labels_by_time = {}
+    target_shape = None
+    for t, mask_path in sorted(time_map.items(), key=lambda kv: int(kv[0])):
+        arr = _as_zyx_mask(tifffile.imread(mask_path))
+        if target_shape is None:
+            target_shape = tuple(arr.shape)
+        elif strict_shape and tuple(arr.shape) != target_shape:
+            raise ValueError(
+                f"shape mismatch for T={t}: expected {target_shape}, got {arr.shape} in {mask_path}"
+            )
+        labels_by_time[int(t)] = arr
+
+    tracking_cfg = UltrackTrackingConfig(max_distance=max_distance)
+    result = track_labels_with_ultrack(labels_by_time, tracking_cfg)
+    written = save_tracked_masks_by_time(
+        result,
+        out_folder,
+        compression=compression,
+    )
+
+    max_label_seen = 0
+    for arr in result.as_time_dict().values():
+        if np.asarray(arr).size > 0:
+            try:
+                max_label_seen = max(max_label_seen, int(np.asarray(arr).max()))
+            except Exception:
+                pass
+
+    return out_folder, written, max_label_seen, result
+
+
 def _save_timepoint_mask_tiff(
     parent,
     time_index,
@@ -1632,13 +1696,13 @@ def _build_ome_from_timepoint_masks(parent):
 
 def _make_4d_stack_from_timepoint_masks(parent):
     """
-    GUI action: stitch ROI IDs across time after segmentation has already run.
+    GUI action: track ROI IDs across time after segmentation has already run.
 
     Inputs:
       - per-timepoint mask TIFFs in *_cp_masks_by_time
     Outputs:
-      - stitched per-timepoint TIFFs in *_cp_masks_4d_by_time
-      - combined 4D labeled OME-TIFF (TZYX) from stitched outputs
+      - tracked per-timepoint TIFFs in *_cp_masks_4d_by_time
+      - combined 4D labeled OME-TIFF (TZYX) from tracked outputs
     """
     if not GUI:
         print("ERROR: GUI not available for folder selection")
@@ -1646,7 +1710,7 @@ def _make_4d_stack_from_timepoint_masks(parent):
     if bool(getattr(parent, "_segmentation_running", False)) or bool(
         getattr(parent, "_segmentation_all_running", False)
     ):
-        print("GUI_INFO: segmentation is running; wait for completion before 4D stitching")
+        print("GUI_INFO: segmentation is running; wait for completion before 4D tracking")
         return
 
     default_in = None
@@ -1676,36 +1740,34 @@ def _make_4d_stack_from_timepoint_masks(parent):
         if not folder:
             return
 
-    threshold = 0.25
+    max_distance = 15.0
     try:
         if hasattr(parent, "segmentation_settings"):
-            threshold = float(
-                getattr(parent.segmentation_settings, "time_stitch_threshold", 0.25)
+            max_distance = float(
+                getattr(parent.segmentation_settings, "tracking_max_distance", 15.0)
             )
     except Exception:
-        threshold = 0.25
-    threshold = _clamp_stitch_threshold(threshold, default=0.25)
+        max_distance = 15.0
 
     out_folder = _default_4d_stitched_folder_from_mask_folder(folder)
     print(
-        "GUI_INFO: starting standalone 4D stitching "
-        f"(input={folder}, output={out_folder}, IOU={threshold:.3f})"
+        "GUI_INFO: starting standalone 4D tracking "
+        f"(input={folder}, output={out_folder}, max_distance={max_distance:.3f})"
     )
     try:
-        out_folder, written, max_label = stitch_timepoint_masks_folder(
+        out_folder, written, max_label, _tracking_result = track_timepoint_masks_folder_with_ultrack(
             folder,
             output_folder=out_folder,
-            stitch_threshold=threshold,
-            stitch_over_z=True,
+            max_distance=max_distance,
             strict_shape=False,
             compression="zlib",
         )
         print(
-            "GUI_INFO: completed 4D stitching -> "
+            "GUI_INFO: completed 4D tracking -> "
             f"{len(written)} timepoints written in {out_folder} (max_label={int(max_label)})"
         )
     except Exception as e:
-        print(f"ERROR: failed standalone 4D stitching for folder {folder}: {e}")
+        print(f"ERROR: failed standalone 4D tracking for folder {folder}: {e}")
         return
 
     try:
@@ -1717,13 +1779,13 @@ def _make_4d_stack_from_timepoint_masks(parent):
             compression="zlib",
         )
         print(
-            f"GUI_INFO: wrote stitched 4D OME-TIFF {ome_path} "
+            f"GUI_INFO: wrote tracked 4D OME-TIFF {ome_path} "
             f"shape=(T={nt}, Z={shape[0]}, Y={shape[1]}, X={shape[2]}) "
             f"dtype={np.dtype(out_dtype).name}"
         )
     except Exception as e:
         print(
-            "GUI_WARNING: stitched by-time masks were saved, but building 4D OME-TIFF failed "
+            "GUI_WARNING: tracked by-time masks were saved, but building 4D OME-TIFF failed "
             f"({e})"
         )
 
@@ -1743,13 +1805,13 @@ def _make_4d_stack_from_timepoint_masks(parent):
     except Exception:
         pass
 
-    # If the user requested stitched visualization, refresh current timepoint now.
+    # If the user requested tracked visualization, refresh current timepoint now.
     try:
         if bool(getattr(parent, "show_4d_stitch_view", False)):
             if bool(getattr(parent, "loaded", False)) and bool(getattr(parent, "has_time", False)):
                 parent.set_time_index(int(getattr(parent, "currentT", 0)), force_reload=True)
     except Exception as e:
-        print(f"GUI_WARNING: stitched-view refresh failed: {e}")
+        print(f"GUI_WARNING: tracked-view refresh failed: {e}")
 
 
 def _save_png(parent):

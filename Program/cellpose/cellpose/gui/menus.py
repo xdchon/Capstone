@@ -49,7 +49,7 @@ def mainmenu(parent):
     parent.savePNG.setEnabled(False)
 
     parent.make4DStack = QAction(
-        "Make 4D stack (stitch by-time masks)", parent
+        "Make 4D stack (track by-time masks with Ultrack)", parent
     )
     parent.make4DStack.triggered.connect(
         lambda: io._make_4d_stack_from_timepoint_masks(parent)

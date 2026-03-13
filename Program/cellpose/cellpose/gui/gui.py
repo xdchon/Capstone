@@ -22,6 +22,7 @@ from ..io import get_image_files, imsave, imread
 from ..transforms import resize_image, normalize99, normalize99_tile, smooth_sharpen_img
 from ..models import normalize_default
 from ..plot import disk
+from ..ultrack_tracking import UltrackTrackingConfig, track_labels_with_ultrack
 
 try:
     import matplotlib.pyplot as plt
@@ -539,10 +540,9 @@ class MainW(QMainWindow):
         self._seg_all_custom = False
         self._seg_all_model_name = None
         self._seg_all_first = True
-        self._seg_all_time_stitch_enabled = False
-        self._seg_all_time_stitch_threshold = 0.25
-        self._seg_all_time_prev_masks = None
-        self._seg_all_time_next_label = 1
+        self._seg_all_selected_timepoints = ()
+        self._seg_all_time_tracking_enabled = False
+        self._seg_all_tracking_max_distance = None
         self.seg_time_data = None
         self._current_seg_preserve_labels = False
         self.reset()
@@ -720,11 +720,11 @@ class MainW(QMainWindow):
 
         widget_row += 1
         self.show_4d_stitch_view = False
-        self.show4DStitchCheckBox = QCheckBox("show 4D stitched masks")
+        self.show4DStitchCheckBox = QCheckBox("show 4D tracked masks")
         self.show4DStitchCheckBox.setFont(self.medfont)
         self.show4DStitchCheckBox.setChecked(False)
         self.show4DStitchCheckBox.setToolTip(
-            "toggle visualization of post-processed 4D stitched masks.\n"
+            "toggle visualization of post-processed 4D tracked masks.\n"
             "when enabled, time navigation prefers *_cp_masks_4d_by_time outputs."
         )
         self.show4DStitchCheckBox.toggled.connect(self.toggle_4d_stitch_view)
@@ -1509,7 +1509,7 @@ class MainW(QMainWindow):
     def toggle_4d_stitch_view(self, checked):
         self.show_4d_stitch_view = bool(checked)
         state = "ON" if self.show_4d_stitch_view else "OFF"
-        print(f"GUI_INFO: show 4D stitched masks is {state}")
+        print(f"GUI_INFO: show 4D tracked masks is {state}")
         if (
             self.loaded
             and bool(getattr(self, "has_time", False))
@@ -1602,7 +1602,7 @@ class MainW(QMainWindow):
         self._current_seg_preserve_labels = False
         self._seg_all_total = 0
         self._seg_all_current_t = None
-        self._reset_time_stitch_state()
+        self._reset_time_tracking_state()
         self._time_mask_base = None
         self._time_mask_folder = None
         self._time_mask_folder_mtime = None
@@ -2617,11 +2617,10 @@ class MainW(QMainWindow):
             self.start_segmentation_async(custom=True, time_index=seg_T)
 
 
-    def _reset_time_stitch_state(self):
-        self._seg_all_time_stitch_enabled = False
-        self._seg_all_time_stitch_threshold = 0.25
-        self._seg_all_time_prev_masks = None
-        self._seg_all_time_next_label = 1
+    def _reset_time_tracking_state(self):
+        self._seg_all_selected_timepoints = ()
+        self._seg_all_time_tracking_enabled = False
+        self._seg_all_tracking_max_distance = None
 
     @staticmethod
     def _compact_positive_labels(labels):
@@ -2748,6 +2747,120 @@ class MainW(QMainWindow):
         except Exception as e:
             print(f"ERROR: could not cache segmentation for T={time_index}: {e}")
 
+    def _cache_tracked_timepoint_result(self, masks, time_index):
+        """Cache Ultrack-tracked masks in the 4D result store."""
+        try:
+            t = int(time_index)
+            if not isinstance(getattr(self, "seg_time_data_4d", None), dict):
+                self.seg_time_data_4d = {}
+            masks_arr = np.asarray(masks)
+            self.seg_time_data_4d[t] = {
+                "masks": masks_arr.copy(),
+                "outlines": None,
+                "colors": None,
+                "time_index": t,
+                "axes": "ZYX" if masks_arr.ndim == 3 else "YX",
+                "preserve_labels": True,
+            }
+        except Exception as e:
+            print(f"ERROR: could not cache Ultrack result for T={time_index}: {e}")
+
+    def _track_cached_timepoints_with_ultrack(self):
+        """Run Ultrack over the cached masks from the latest multi-timepoint run."""
+        if not getattr(self, "_seg_all_time_tracking_enabled", False):
+            return
+
+        per_time = getattr(self, "seg_time_data", None)
+        if not isinstance(per_time, dict) or len(per_time) == 0:
+            print("GUI_WARNING: no cached timepoints available for Ultrack tracking")
+            return
+
+        selected = []
+        for t in getattr(self, "_seg_all_selected_timepoints", ()):
+            t_int = int(t)
+            if isinstance(per_time.get(t_int), dict) and "masks" in per_time[t_int]:
+                selected.append(t_int)
+        if len(selected) == 0:
+            selected = sorted(int(t) for t in per_time.keys())
+        if len(selected) == 0:
+            print("GUI_WARNING: no valid cached masks available for Ultrack tracking")
+            return
+
+        labels_by_time = {}
+        for t in selected:
+            entry = per_time.get(int(t))
+            if not isinstance(entry, dict) or "masks" not in entry:
+                continue
+            labels_by_time[int(t)] = np.asarray(entry["masks"]).copy()
+        if len(labels_by_time) == 0:
+            print("GUI_WARNING: cached mask entries are empty; skipping Ultrack tracking")
+            return
+
+        max_distance = getattr(self, "_seg_all_tracking_max_distance", None)
+        tracking_cfg = UltrackTrackingConfig(max_distance=max_distance)
+        range_text = (
+            f"T={selected[0]}..{selected[-1]}"
+            if len(selected) > 1
+            else f"T={selected[0]}"
+        )
+        if max_distance is None:
+            print(
+                "GUI_INFO: starting Ultrack tracking over "
+                f"{range_text} ({len(selected)} timepoints)"
+            )
+        else:
+            print(
+                "GUI_INFO: starting Ultrack tracking over "
+                f"{range_text} ({len(selected)} timepoints, max_distance={max_distance:.3f})"
+            )
+
+        self.progress.setValue(5)
+        tracking_result = track_labels_with_ultrack(labels_by_time, tracking_cfg)
+        self.progress.setValue(70)
+
+        if not isinstance(getattr(self, "seg_time_data_4d", None), dict):
+            self.seg_time_data_4d = {}
+        else:
+            self.seg_time_data_4d.clear()
+
+        base = os.path.splitext(self.filename)[0]
+        save_dir = base + "_cp_masks_4d_by_time"
+        for t, tracked_masks in tracking_result.as_time_dict().items():
+            self._cache_tracked_timepoint_result(tracked_masks, t)
+            io._save_timepoint_mask_tiff(
+                self,
+                t,
+                masks=tracked_masks,
+                base=base,
+                output_folder=save_dir,
+                cache_as_stitched=True,
+            )
+
+        try:
+            ome_out = io._default_ome_output_from_mask_folder(save_dir)
+            ome_path, nt, shape, out_dtype = io.combine_timepoint_masks_folder_to_ome(
+                save_dir,
+                output_path=ome_out,
+                strict_shape=False,
+                compression="zlib",
+            )
+            print(
+                f"GUI_INFO: wrote tracked 4D OME-TIFF {ome_path} "
+                f"shape=(T={nt}, Z={shape[0]}, Y={shape[1]}, X={shape[2]}) "
+                f"dtype={np.dtype(out_dtype).name}"
+            )
+        except Exception as e:
+            print(
+                "GUI_WARNING: tracked by-time masks were saved, but building 4D OME-TIFF failed "
+                f"({e})"
+            )
+
+        self.progress.setValue(100)
+        print(
+            "GUI_INFO: completed Ultrack tracking -> "
+            f"{len(tracking_result.time_indices)} timepoints written in {save_dir}"
+        )
+
 
     def compute_segmentation_all_timepoints(self, custom=False):
         """Run segmentation for a selected timepoint range in a 5D stack.
@@ -2756,7 +2869,7 @@ class MainW(QMainWindow):
         this iterates over the selected time indices and calls `compute_segmentation`
         at each timepoint, reusing the same model for speed.
 
-        Optionally, ROI IDs can be stitched across adjacent timepoints.
+        Optionally, Ultrack can assign consistent ROI IDs across adjacent timepoints.
         """
         if self._segmentation_running or self._segmentation_all_running:
             print("GUI_INFO: segmentation already running; please wait for it to finish")
@@ -2800,22 +2913,24 @@ class MainW(QMainWindow):
             f"T={selected_timepoints[0]}..{selected_timepoints[-1]} "
             f"({len(selected_timepoints)} total)"
         )
-        self._reset_time_stitch_state()
+        self._reset_time_tracking_state()
+        self._seg_all_selected_timepoints = tuple(selected_timepoints)
         try:
-            self._seg_all_time_stitch_enabled = bool(
-                getattr(self.segmentation_settings, "stitch_over_time", False)
+            self._seg_all_time_tracking_enabled = bool(
+                getattr(self.segmentation_settings, "track_over_time", False)
             )
-            self._seg_all_time_stitch_threshold = float(
-                getattr(self.segmentation_settings, "time_stitch_threshold", 0.25)
+            self._seg_all_tracking_max_distance = float(
+                getattr(self.segmentation_settings, "tracking_max_distance", 15.0)
             )
         except Exception:
-            self._seg_all_time_stitch_enabled = False
-            self._seg_all_time_stitch_threshold = 0.25
-        if self._seg_all_time_stitch_enabled:
+            self._seg_all_time_tracking_enabled = False
+            self._seg_all_tracking_max_distance = None
+        if self._seg_all_time_tracking_enabled:
             print(
-                "GUI_INFO: 4D time stitching enabled "
-                f"(IOU threshold={self._seg_all_time_stitch_threshold:.3f})"
+                "GUI_INFO: Ultrack time tracking enabled "
+                f"(max_distance={float(self._seg_all_tracking_max_distance):.3f})"
             )
+            self.seg_time_data_4d = {}
         self._segmentation_running = False
         # kick off first timepoint
         self._segmentation_all_next()
@@ -2827,6 +2942,11 @@ class MainW(QMainWindow):
             return
 
         if len(self._seg_all_queue) == 0:
+            if getattr(self, "_seg_all_time_tracking_enabled", False):
+                try:
+                    self._track_cached_timepoints_with_ultrack()
+                except Exception as e:
+                    print(f"ERROR: Ultrack tracking failed after segmentation: {e}")
             # finished all timepoints; mark complete and restore the timepoint
             # the user was on when the run started
             print(
@@ -2837,7 +2957,7 @@ class MainW(QMainWindow):
             self._segmentation_running = False
             self._seg_all_current_t = None
             self._seg_all_total = 0
-            self._reset_time_stitch_state()
+            self._reset_time_tracking_state()
             try:
                 t_restore = int(getattr(self, "_seg_all_original_T", 0))
                 if getattr(self, "has_time", False) and int(getattr(self, "NT", 1)) > 1:
@@ -2919,18 +3039,6 @@ class MainW(QMainWindow):
         downscale = getattr(self.segmentation_settings, "downscale_factor", 1.0)
 
         do_3D = False if stitch_threshold > 0.0 else do_3D
-
-        # Heuristic: for huge 3D volumes from .sldy, prefer 2D+stitch
-        # to avoid extremely long 3D runs.
-        volume_pixels = int(self.NZ) * int(self.Ly0) * int(self.Lx0)
-        if do_3D and volume_pixels > 2_00_000_000:  # tweak threshold as you like
-            print(
-                f"GUI_INFO: volume {self.NZ}x{self.Ly0}x{self.Lx0} is very large; "
-                "switching from 3D to 2D+stitch for speed"
-            )
-            do_3D = False
-            if stitch_threshold <= 0.0:
-                stitch_threshold = 0.4
 
         # choose segmentation data
         # Always pick data by explicit time index (seg_T) to decouple from GUI slider.
@@ -3174,40 +3282,6 @@ class MainW(QMainWindow):
                 self.progress.setValue(0)
                 return
 
-            if (
-                self._segmentation_all_running
-                and seg_time_index is not None
-                and getattr(self, "_seg_all_time_stitch_enabled", False)
-            ):
-                try:
-                    do_3D_result = bool(result.get("do_3D", False))
-                    try:
-                        z_stitch_in_model = float(result.get("stitch_threshold", 0.0))
-                    except Exception:
-                        z_stitch_in_model = 0.0
-                    # 4D mode should preserve IDs across Z and T.
-                    # If model settings did not already stitch Z (do_3D=False and stitch_threshold<=0),
-                    # apply Z stitching here before time stitching.
-                    if (
-                        np.asarray(masks).ndim == 3
-                        and np.asarray(masks).shape[0] > 1
-                        and (not do_3D_result)
-                        and z_stitch_in_model <= 0.0
-                    ):
-                        z_th = float(getattr(self, "_seg_all_time_stitch_threshold", 0.25))
-                        print(
-                            "GUI_INFO: 4D stitch mode -> stitching over Z first "
-                            f"for T={seg_time_index} (IOU={z_th:.3f})"
-                        )
-                        masks = self._stitch_masks_over_z(masks, stitch_threshold=z_th)
-                    masks = self._stitch_masks_over_time(masks, seg_time_index)
-                    preserve_labels = True
-                except Exception as e:
-                    print(
-                        "GUI_WARNING: time-stitching failed at "
-                        f"T={seg_time_index}; keeping independent labels ({e})"
-                    )
-
             self.flows = flows_display
             n_cells = len(np.unique(masks)[1:])
             if elapsed is not None:
@@ -3303,4 +3377,4 @@ class MainW(QMainWindow):
                 self._segmentation_all_running = False
                 self._seg_all_current_t = None
                 self._seg_all_total = 0
-                self._reset_time_stitch_state()
+                self._reset_time_tracking_state()
