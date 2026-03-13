@@ -2,7 +2,7 @@
 Copyright © 2025 Howard Hughes Medical Institute, Authored by Carsen Stringer, Michael Rariden and Marius Pachitariu.
 """
 
-import sys, os, pathlib, warnings, datetime, time, copy
+import sys, os, pathlib, warnings, datetime, time, copy, gc
 
 from qtpy import QtGui, QtCore
 from superqt import QRangeSlider, QCollapsible
@@ -119,6 +119,12 @@ class SegmentationWorker(QtCore.QObject):
             self.finished.emit(result)
         except Exception as e:
             self.error.emit(str(e))
+        finally:
+            # Drop large per-run references before the next timepoint starts.
+            self.data = None
+            self.cfg = None
+            self.geom = None
+            self.model = None
 
 
 def _process_segmentation_outputs(
@@ -1603,6 +1609,7 @@ class MainW(QMainWindow):
         self._seg_all_total = 0
         self._seg_all_current_t = None
         self._seg_all_cached_results = None
+        self._seg_all_force_model_reload = False
         self._reset_time_tracking_state()
         self._time_mask_base = None
         self._time_mask_folder = None
@@ -2623,6 +2630,37 @@ class MainW(QMainWindow):
         self._seg_all_time_tracking_enabled = False
         self._seg_all_tracking_max_distance = None
         self._seg_all_cached_results = None
+        self._seg_all_force_model_reload = False
+
+    def _release_segmentation_resources(self):
+        """Release worker/thread references before launching another timepoint."""
+        worker = getattr(self, "_segmentation_worker", None)
+        thread = getattr(self, "_segmentation_thread", None)
+        self._segmentation_worker = None
+        self._segmentation_thread = None
+
+        try:
+            if worker is not None:
+                worker.data = None
+                worker.cfg = None
+                worker.geom = None
+                worker.model = None
+        except Exception:
+            pass
+
+        del worker
+        del thread
+        gc.collect()
+        try:
+            torch_mod = getattr(models, "torch", None)
+            if torch_mod is not None:
+                if hasattr(torch_mod, "cuda") and torch_mod.cuda.is_available():
+                    torch_mod.cuda.empty_cache()
+                mps_mod = getattr(torch_mod, "mps", None)
+                if mps_mod is not None and hasattr(mps_mod, "empty_cache"):
+                    mps_mod.empty_cache()
+        except Exception:
+            pass
 
     @staticmethod
     def _compact_positive_labels(labels):
@@ -2954,6 +2992,19 @@ class MainW(QMainWindow):
                 f"(max_distance={float(self._seg_all_tracking_max_distance):.3f})"
             )
             self.seg_time_data_4d = {}
+        self._seg_all_force_model_reload = bool(
+            self.load_3D
+            or (
+                hasattr(self, "useGPU")
+                and callable(getattr(self.useGPU, "isChecked", None))
+                and self.useGPU.isChecked()
+            )
+        )
+        if self._seg_all_force_model_reload:
+            print(
+                "GUI_INFO: reloading the segmentation model between timepoints "
+                "to avoid stale 3D/GPU worker state"
+            )
         self._segmentation_running = False
         # kick off first timepoint
         self._segmentation_all_next()
@@ -2997,23 +3048,25 @@ class MainW(QMainWindow):
         print(f"GUI_INFO: starting segmentation T={t} [{seg_idx}/{seg_total}]")
 
         # load model only on first timepoint; reuse for subsequent ones
-        load_model = self._seg_all_first
+        load_model = self._seg_all_first or bool(
+            getattr(self, "_seg_all_force_model_reload", False)
+        )
         self._seg_all_first = False
 
         if self._seg_all_custom:
-            self.start_segmentation_async(
+            started = self.start_segmentation_async(
                 custom=True,
                 load_model=load_model,
                 time_index=t,
             )
         else:
-            self.start_segmentation_async(
+            started = self.start_segmentation_async(
                 model_name=self._seg_all_model_name,
                 load_model=load_model,
                 time_index=t,
             )
 
-        if not self._segmentation_running:
+        if not started:
             print(
                 f"GUI_WARNING: segmentation did not launch for T={t}; "
                 "skipping to the next timepoint"
@@ -3255,7 +3308,7 @@ class MainW(QMainWindow):
         """Launch segmentation in a background thread so GUI stays responsive."""
         if self._segmentation_running:
             print("GUI_INFO: segmentation already running; please wait for it to finish")
-            return
+            return False
 
         self.progress.setValue(0)
         try:
@@ -3265,7 +3318,7 @@ class MainW(QMainWindow):
         except Exception as e:
             print(f"ERROR: {e}")
             self.progress.setValue(0)
-            return
+            return False
 
         data = cfg["data"]
         geom = {
@@ -3297,6 +3350,7 @@ class MainW(QMainWindow):
             self._on_segmentation_thread_finished
         )
         self._segmentation_thread.start()
+        return True
 
     def _on_segmentation_error(self, message):
         t_running = getattr(self, "_seg_all_current_t", None)
@@ -3421,6 +3475,7 @@ class MainW(QMainWindow):
 
     def _on_segmentation_thread_finished(self):
         self._segmentation_running = False
+        self._release_segmentation_resources()
         # if running multi-timepoint segmentation, advance to next timepoint
         if self._segmentation_all_running:
             try:
