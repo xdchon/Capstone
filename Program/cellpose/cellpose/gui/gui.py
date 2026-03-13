@@ -544,6 +544,9 @@ class MainW(QMainWindow):
         self._seg_all_total = 0
         self._seg_all_current_t = None
         self._seg_all_original_T = 0
+        self._segmentation_result_handled = False
+        self._segmentation_thread_finished_flag = False
+        self._segmentation_batch_advance_scheduled = False
         self._seg_all_custom = False
         self._seg_all_model_name = None
         self._seg_all_first = True
@@ -1611,6 +1614,9 @@ class MainW(QMainWindow):
         self._seg_all_current_t = None
         self._seg_all_cached_results = None
         self._seg_all_force_model_reload = False
+        self._segmentation_result_handled = False
+        self._segmentation_thread_finished_flag = False
+        self._segmentation_batch_advance_scheduled = False
         self._reset_time_tracking_state()
         self._time_mask_base = None
         self._time_mask_folder = None
@@ -2632,6 +2638,9 @@ class MainW(QMainWindow):
         self._seg_all_tracking_max_distance = None
         self._seg_all_cached_results = None
         self._seg_all_force_model_reload = False
+        self._segmentation_result_handled = False
+        self._segmentation_thread_finished_flag = False
+        self._segmentation_batch_advance_scheduled = False
 
     def _release_segmentation_resources(self):
         """Release worker/thread references before launching another timepoint."""
@@ -2649,6 +2658,12 @@ class MainW(QMainWindow):
         except Exception:
             pass
 
+        if getattr(self, "_seg_all_force_model_reload", False):
+            try:
+                self.model = None
+            except Exception:
+                pass
+
         del worker
         del thread
         gc.collect()
@@ -2662,6 +2677,19 @@ class MainW(QMainWindow):
                     mps_mod.empty_cache()
         except Exception:
             pass
+
+    def _maybe_advance_batch_segmentation(self):
+        """Advance multi-timepoint segmentation only after result handling is complete."""
+        if not self._segmentation_all_running:
+            return
+        if getattr(self, "_segmentation_batch_advance_scheduled", False):
+            return
+        if not getattr(self, "_segmentation_result_handled", False):
+            return
+        if not getattr(self, "_segmentation_thread_finished_flag", False):
+            return
+        self._segmentation_batch_advance_scheduled = True
+        QtCore.QTimer.singleShot(0, self._segmentation_all_next)
 
     @staticmethod
     def _compact_positive_labels(labels):
@@ -2930,6 +2958,12 @@ class MainW(QMainWindow):
             return
 
         if not getattr(self, "has_time", False) or getattr(self, "NT", 1) <= 1:
+            print(
+                "GUI_WARNING: timepoint-range segmentation was requested, but the "
+                "loaded image is not currently recognized as a multi-timepoint stack "
+                f"(has_time={getattr(self, 'has_time', False)}, NT={int(getattr(self, 'NT', 1))}). "
+                "Running only the current view."
+            )
             # no time axis -> just segment current view (async)
             self.start_segmentation_async(custom=custom)
             return
@@ -2951,6 +2985,7 @@ class MainW(QMainWindow):
         if len(selected_timepoints) == 0:
             print("GUI_WARNING: no timepoints selected for segmentation")
             return
+        print(f"GUI_INFO: resolved selected timepoints = {selected_timepoints}")
 
         # initialize async multi-timepoint segmentation state
         self._segmentation_all_running = True
@@ -2993,19 +3028,11 @@ class MainW(QMainWindow):
                 f"(max_distance={float(self._seg_all_tracking_max_distance):.3f})"
             )
             self.seg_time_data_4d = {}
-        self._seg_all_force_model_reload = bool(
-            self.load_3D
-            or (
-                hasattr(self, "useGPU")
-                and callable(getattr(self.useGPU, "isChecked", None))
-                and self.useGPU.isChecked()
-            )
+        self._seg_all_force_model_reload = True
+        print(
+            "GUI_INFO: reloading the segmentation model between timepoints "
+            "to avoid stale worker state across batch runs"
         )
-        if self._seg_all_force_model_reload:
-            print(
-                "GUI_INFO: reloading the segmentation model between timepoints "
-                "to avoid stale 3D/GPU worker state"
-            )
         self._segmentation_running = False
         # kick off first timepoint
         self._segmentation_all_next()
@@ -3048,7 +3075,8 @@ class MainW(QMainWindow):
         seg_total = int(getattr(self, "_seg_all_total", 0))
         print(f"GUI_INFO: starting segmentation T={t} [{seg_idx}/{seg_total}]")
 
-        # load model only on first timepoint; reuse for subsequent ones
+        # Reload the model for each batch timepoint to avoid reusing torch /
+        # CPSAM state across separate worker threads.
         load_model = self._seg_all_first or bool(
             getattr(self, "_seg_all_force_model_reload", False)
         )
@@ -3346,6 +3374,9 @@ class MainW(QMainWindow):
         }
 
         self._segmentation_running = True
+        self._segmentation_result_handled = False
+        self._segmentation_thread_finished_flag = False
+        self._segmentation_batch_advance_scheduled = False
         self._segmentation_thread = QtCore.QThread(self)
         self._segmentation_worker = SegmentationWorker(self.model, data, cfg, geom)
         self._segmentation_worker.moveToThread(self._segmentation_thread)
@@ -3371,11 +3402,14 @@ class MainW(QMainWindow):
         else:
             print(f"NET ERROR at T={t_running}: {message}")
         self.progress.setValue(0)
+        if self._segmentation_all_running:
+            self._segmentation_result_handled = True
         if self._segmentation_thread is not None:
             try:
                 self._segmentation_thread.quit()
             except Exception:
                 pass
+        self._maybe_advance_batch_segmentation()
 
     def _on_segmentation_finished(self, result):
         is_batch_run = False
@@ -3484,14 +3518,19 @@ class MainW(QMainWindow):
                     io._save_sets_with_check(self)
                 except Exception as e:
                     print(f"ERROR: could not autosave segmentation: {e}")
+        finally:
+            if self._segmentation_all_running:
+                self._segmentation_result_handled = True
+                self._maybe_advance_batch_segmentation()
 
     def _on_segmentation_thread_finished(self):
         self._segmentation_running = False
         self._release_segmentation_resources()
+        self._segmentation_thread_finished_flag = True
         # if running multi-timepoint segmentation, advance to next timepoint
         if self._segmentation_all_running:
             try:
-                QtCore.QTimer.singleShot(0, self._segmentation_all_next)
+                self._maybe_advance_batch_segmentation()
             except Exception as e:
                 print(f"ERROR: could not advance multi-timepoint segmentation: {e}")
                 self._segmentation_all_running = False

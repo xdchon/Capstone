@@ -54,7 +54,7 @@ io_logger = logging.getLogger(__name__)
 
 
 class LazySldy:
-    """Lazy reader for SlideBook .sldy using bundled SBReadFile toolkit."""
+    """Lazy reader for SlideBook .sldy/.sldyz using bundled SBReadFile toolkit."""
 
     def __init__(self, path, capture_index=0, position_index=0):
         import importlib.util
@@ -70,7 +70,7 @@ class LazySldy:
         self.reader = SBReadFile.SBReadFile()
         ok = self.reader.Open(path, All=True)
         if not ok:
-            raise ValueError(f"failed to open sldy file: {path}")
+            raise ValueError(f"failed to open SlideBook file: {path}")
         self.capture = capture_index
         self.position = position_index
         self.nt = self.reader.GetNumTimepoints(self.capture)
@@ -385,12 +385,12 @@ def imread(filename):
     """
     # ensure that extension check is not case sensitive
     ext = os.path.splitext(filename)[-1].lower()
-    if ext == ".sldy":
+    if ext in (".sldy", ".sldyz"):
         # handled in imread_3D; return lazy reader directly
         try:
             return LazySldy(filename)
         except Exception as e:
-            io_logger.critical(f"ERROR: could not read sldy file, {e}")
+            io_logger.critical(f"ERROR: could not read SlideBook file, {e}")
             return None
     if ext in (".tif", ".tiff", ".flex", ".btf"):
         with tifffile.TiffFile(filename) as tif:
@@ -473,6 +473,10 @@ def imread_2D(img_file):
         img_out (numpy.ndarray): The 3-channel image data as a NumPy array.
     """
     img = imread(img_file)
+    if hasattr(img, "get_time_stack"):
+        # Let the GUI initialize the lazy time-aware source instead of forcing
+        # it through 2D array conversion.
+        return img
     return transforms.convert_image(img, do_3D=False)
 
 
@@ -679,7 +683,7 @@ def get_image_files(folder, mask_filter, imf=None, look_one_level_down=False):
     if look_one_level_down:
         folders = natsorted(glob.glob(os.path.join(folder, "*/")))
     folders.append(folder)
-    exts = [".png", ".jpg", ".jpeg", ".tif", ".tiff", ".btf", ".flex", ".dax", ".nd2", ".nrrd", ".sldy"]
+    exts = [".png", ".jpg", ".jpeg", ".tif", ".tiff", ".btf", ".flex", ".dax", ".nd2", ".nrrd", ".sldy", ".sldyz"]
     l0 = 0
     al = 0
     for folder in folders:
