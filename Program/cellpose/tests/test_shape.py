@@ -89,6 +89,32 @@ def test_shape_3D_1ch_3ndim_diam(cellposemodel_fixture_2layer):
     assert masks.shape == (5, 80, 80)
 
 
+@pytest.mark.slow
+def test_shape_3D_lazy_time_stack(cellposemodel_fixture_2layer):
+    class FakeLazyTimeStack:
+
+        axes = "TZYX"
+        shape = (2, 4, 32, 32)
+        nt = 2
+
+        def get_plane(self, _t_index, _z_index):
+            return np.zeros((32, 32), dtype=np.float32)
+
+        def get_time_stack(self, _t_index):
+            return np.zeros((4, 32, 32), dtype=np.float32)
+
+    masks_all, flows_all, _ = cellposemodel_fixture_2layer.eval(
+        FakeLazyTimeStack(),
+        channel_axis=None,
+        z_axis=0,
+        do_3D=True,
+    )
+    assert len(masks_all) == 2
+    assert masks_all[0].shape == (4, 32, 32)
+    assert flows_all[0][1].shape == (3, 4, 32, 32)
+    assert flows_all[0][2].shape == (4, 32, 32)
+
+
 def test_shape_3D_2ch(cellposemodel_fixture_2layer):
     img = np.zeros((80, 2, 80, 4))
 

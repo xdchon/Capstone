@@ -16,14 +16,12 @@ from scipy.stats import mode
 import cv2
 
 from . import guiparts, menus, io
-from .. import models, core, dynamics, metrics, version, train
-from ..utils import download_url_to_file, masks_to_outlines, diameters, stitch3D
+from .. import models, core, dynamics, version, train
+from ..utils import download_url_to_file, masks_to_outlines, diameters
 from ..io import get_image_files, imsave, imread
 from ..transforms import resize_image, normalize99, normalize99_tile, smooth_sharpen_img
 from ..models import normalize_default
 from ..plot import disk
-from ..ultrack_tracking import UltrackTrackingConfig, track_labels_with_ultrack
-
 try:
     import matplotlib.pyplot as plt
     MATPLOTLIB = True
@@ -31,6 +29,7 @@ except:
     MATPLOTLIB = False
 
 Horizontal = QtCore.Qt.Orientation.Horizontal
+_ACTIVE_MAIN_WINDOWS = []
 
 
 class SegmentationWorker(QtCore.QObject):
@@ -67,65 +66,23 @@ class SegmentationWorker(QtCore.QObject):
             normalize_params = cfg["normalize_params"]
             z_axis = cfg["z_axis"]
             channel_axis = cfg["channel_axis"]
-            fallback_stitch_threshold = cfg.get(
-                "fallback_stitch_threshold", stitch_threshold
-            )
-
             self.progress.emit(25)
-            eval_do_3d = bool(do_3D)
-            eval_stitch_threshold = float(stitch_threshold)
-            eval_anisotropy = anisotropy
-            try:
-                masks, flows = self.model.eval(
-                    data,
-                    diameter=diameter,
-                    cellprob_threshold=cellprob_threshold,
-                    flow_threshold=flow_threshold,
-                    do_3D=eval_do_3d,
-                    niter=niter,
-                    normalize=normalize_params,
-                    stitch_threshold=eval_stitch_threshold,
-                    anisotropy=eval_anisotropy,
-                    flow3D_smooth=flow3D_smooth,
-                    min_size=min_size,
-                    channel_axis=channel_axis,
-                    progress=None,
-                    z_axis=z_axis,
-                )[:2]
-            except RuntimeError as e:
-                if not eval_do_3d:
-                    raise
-
-                # If 3D fails (commonly GPU/CPU OOM), retry as 2D to keep
-                # long timepoint runs moving instead of aborting.
-                try:
-                    fallback_stitch = float(fallback_stitch_threshold)
-                except Exception:
-                    fallback_stitch = 0.0
-                fallback_stitch = max(0.0, min(1.0, fallback_stitch))
-                eval_do_3d = False
-                eval_stitch_threshold = fallback_stitch
-                eval_anisotropy = None
-                print(
-                    "GUI_WARNING: 3D segmentation failed; retrying in 2D mode "
-                    f"(stitch_threshold={eval_stitch_threshold:.3f}). Error: {e}"
-                )
-                masks, flows = self.model.eval(
-                    data,
-                    diameter=diameter,
-                    cellprob_threshold=cellprob_threshold,
-                    flow_threshold=flow_threshold,
-                    do_3D=eval_do_3d,
-                    niter=niter,
-                    normalize=normalize_params,
-                    stitch_threshold=eval_stitch_threshold,
-                    anisotropy=eval_anisotropy,
-                    flow3D_smooth=flow3D_smooth,
-                    min_size=min_size,
-                    channel_axis=channel_axis,
-                    progress=None,
-                    z_axis=z_axis,
-                )[:2]
+            masks, flows = self.model.eval(
+                data,
+                diameter=diameter,
+                cellprob_threshold=cellprob_threshold,
+                flow_threshold=flow_threshold,
+                do_3D=do_3D,
+                niter=niter,
+                normalize=normalize_params,
+                stitch_threshold=stitch_threshold,
+                anisotropy=anisotropy,
+                flow3D_smooth=flow3D_smooth,
+                min_size=min_size,
+                channel_axis=channel_axis,
+                progress=None,
+                z_axis=z_axis,
+            )[:2]
 
             self.progress.emit(60)
 
@@ -133,8 +90,8 @@ class SegmentationWorker(QtCore.QObject):
                 masks,
                 flows,
                 load_3D=geom["load_3D"],
-                do_3D=eval_do_3d,
-                stitch_threshold=eval_stitch_threshold,
+                do_3D=do_3D,
+                stitch_threshold=stitch_threshold,
                 downscale=downscale,
                 Ly=geom["Ly"],
                 Lx=geom["Lx"],
@@ -151,8 +108,8 @@ class SegmentationWorker(QtCore.QObject):
                 "masks": masks,
                 "flows": flows_display,
                 "recompute_masks": recompute_masks,
-                "do_3D": eval_do_3d,
-                "stitch_threshold": eval_stitch_threshold,
+                "do_3D": do_3D,
+                "stitch_threshold": stitch_threshold,
                 "downscale": downscale,
                 "elapsed": elapsed,
                 "time_index": cfg.get("time_index", None),
@@ -462,7 +419,8 @@ def run(image=None):
     app.setWindowIcon(app_icon)
     app.setStyle("Fusion")
     app.setPalette(guiparts.DarkPalette())
-    MainW(image=image, logger=logger)
+    main_window = MainW(image=image, logger=logger)
+    app._cellpose_main_window = main_window
     ret = app.exec_()
     sys.exit(ret)
 
@@ -473,6 +431,14 @@ class MainW(QMainWindow):
         super(MainW, self).__init__()
 
         self.logger = logger
+        app = QApplication.instance()
+        if app is not None:
+            live_windows = getattr(app, "_cellpose_live_windows", None)
+            if live_windows is None:
+                live_windows = []
+                app._cellpose_live_windows = live_windows
+            live_windows.append(self)
+        _ACTIVE_MAIN_WINDOWS.append(self)
         pg.setConfigOptions(imageAxisOrder="row-major")
         self.setGeometry(50, 50, 1200, 1000)
         self.setWindowTitle(f"cellpose v{version}")
@@ -591,9 +557,6 @@ class MainW(QMainWindow):
         self._seg_all_custom = False
         self._seg_all_model_name = None
         self._seg_all_first = True
-        self._seg_all_selected_timepoints = ()
-        self._seg_all_time_tracking_enabled = False
-        self._seg_all_tracking_max_distance = None
         self.seg_time_data = None
         self._current_seg_preserve_labels = False
         self.reset()
@@ -627,6 +590,33 @@ class MainW(QMainWindow):
         self.setAcceptDrops(True)
         self.win.show()
         self.show()
+
+    def closeEvent(self, event):
+        if getattr(self, "_segmentation_running", False) or getattr(
+            self, "_segmentation_all_running", False
+        ):
+            QMessageBox.warning(
+                self,
+                "Segmentation Running",
+                "Wait for the current 3D segmentation run to finish before closing the GUI.",
+            )
+            event.ignore()
+            return
+        app = QApplication.instance()
+        if app is not None:
+            if getattr(app, "_cellpose_main_window", None) is self:
+                app._cellpose_main_window = None
+            live_windows = getattr(app, "_cellpose_live_windows", None)
+            if isinstance(live_windows, list):
+                try:
+                    live_windows.remove(self)
+                except ValueError:
+                    pass
+        try:
+            _ACTIVE_MAIN_WINDOWS.remove(self)
+        except ValueError:
+            pass
+        super().closeEvent(event)
 
     def help_window(self):
         HW = guiparts.HelpWindow(self)
@@ -768,18 +758,6 @@ class MainW(QMainWindow):
         self.MCheckBox.setChecked(True)
         self.MCheckBox.toggled.connect(self.toggle_masks)
         self.drawBoxG.addWidget(self.MCheckBox, widget_row, 0, 1, 5)
-
-        widget_row += 1
-        self.show_4d_stitch_view = False
-        self.show4DStitchCheckBox = QCheckBox("show 4D tracked masks")
-        self.show4DStitchCheckBox.setFont(self.medfont)
-        self.show4DStitchCheckBox.setChecked(False)
-        self.show4DStitchCheckBox.setToolTip(
-            "toggle visualization of post-processed 4D tracked masks.\n"
-            "when enabled, time navigation prefers *_cp_masks_4d_by_time outputs."
-        )
-        self.show4DStitchCheckBox.toggled.connect(self.toggle_4d_stitch_view)
-        self.drawBoxG.addWidget(self.show4DStitchCheckBox, widget_row, 0, 1, 8)
 
         widget_row += 1
         # turn off outlines
@@ -1015,13 +993,6 @@ class MainW(QMainWindow):
             if w is None:
                 continue
             w.setVisible(show_time)
-        if hasattr(self, "show4DStitchCheckBox"):
-            self.show4DStitchCheckBox.setEnabled(show_time)
-            if not show_time:
-                self.show_4d_stitch_view = False
-                self.show4DStitchCheckBox.blockSignals(True)
-                self.show4DStitchCheckBox.setChecked(False)
-                self.show4DStitchCheckBox.blockSignals(False)
         if show_time:
             if hasattr(self, "timeScrollTop") and self.timeScrollTop is not None:
                 self.timeScrollTop.setMaximum(self.NT - 1)
@@ -1075,15 +1046,7 @@ class MainW(QMainWindow):
             try:
                 base, _ = os.path.splitext(self.filename)
                 t_index = int(getattr(self, "currentT", 0))
-                prefer_stitched_view = bool(
-                    getattr(self, "show_4d_stitch_view", False)
-                )
-                # prefer in-memory aggregated time-lapse seg if available
-                per_time = (
-                    getattr(self, "seg_time_data_4d", None)
-                    if prefer_stitched_view
-                    else getattr(self, "seg_time_data", None)
-                )
+                per_time = getattr(self, "seg_time_data", None)
                 if isinstance(per_time, dict):
                     dat_t = per_time.get(t_index)
                     if dat_t is None and str(t_index) in per_time:
@@ -1221,20 +1184,11 @@ class MainW(QMainWindow):
                             seg_loaded = True
                 # final fallback: by-timepoint TIFF folder (e.g. *_cp_masks_by_time)
                 if not seg_loaded:
-                    prefer_stitched = bool(getattr(self, "show_4d_stitch_view", False))
                     seg_loaded = io._load_timepoint_mask_from_by_time(
                         self,
                         base,
                         t_index,
-                        prefer_stitched=prefer_stitched,
                     )
-                    if (not seg_loaded) and prefer_stitched:
-                        seg_loaded = io._load_timepoint_mask_from_by_time(
-                            self,
-                            base,
-                            t_index,
-                            prefer_stitched=False,
-                        )
             except Exception as e:
                 print(f"ERROR: could not auto-load seg for T={self.currentT}: {e}")
             if not seg_loaded and hasattr(self, "cellpix") and hasattr(self, "NZ") and self.NZ is not None:
@@ -1256,13 +1210,9 @@ class MainW(QMainWindow):
                         self.scroll.setValue(self.currentZ)
                         self.scroll.blockSignals(False)
                     try:
-                        plane = self.lazy_data.get_plane(self.currentT, self.currentZ)
-                        plane = plane.astype(np.float32)
-                        pmin, pmax = plane.min(), plane.max()
-                        if pmax > pmin + 1e-3:
-                            plane = (plane - pmin) / (pmax - pmin) * 255.
-                        if hasattr(self, "time_cache") and self.time_cache is not None:
-                            self.time_cache = {(self.currentT, self.currentZ): plane}
+                        plane = io._get_lazy_display_plane(
+                            self, self.currentT, self.currentZ
+                        )
                         self.stack = plane[np.newaxis, ...]
                         self.update_plot()
                     except Exception as e:
@@ -1557,20 +1507,6 @@ class MainW(QMainWindow):
             self.update_plot()
             self.update_layer()
 
-    def toggle_4d_stitch_view(self, checked):
-        self.show_4d_stitch_view = bool(checked)
-        state = "ON" if self.show_4d_stitch_view else "OFF"
-        print(f"GUI_INFO: show 4D tracked masks is {state}")
-        if (
-            self.loaded
-            and bool(getattr(self, "has_time", False))
-            and int(getattr(self, "NT", 1)) > 1
-        ):
-            try:
-                self.set_time_index(int(getattr(self, "currentT", 0)), force_reload=True)
-            except Exception as e:
-                print(f"GUI_WARNING: could not refresh timepoint after 4D-view toggle: {e}")
-
     def make_viewbox(self):
         self.p0 = guiparts.ViewBoxNoRightDrag(parent=self, lockAspect=True,
                                               name="plot1", border=[100, 100,
@@ -1648,27 +1584,20 @@ class MainW(QMainWindow):
         self.loaded = False
         self.recompute_masks = False
         self.seg_time_data = None
-        self.seg_time_data_4d = None
         self._current_seg_time_index = None
         self._current_seg_preserve_labels = False
         self._seg_all_total = 0
         self._seg_all_current_t = None
-        self._seg_all_cached_results = None
         self._seg_all_force_model_reload = False
         self._segmentation_result_handled = False
         self._segmentation_thread_finished_flag = False
         self._segmentation_batch_advance_scheduled = False
-        self._reset_time_tracking_state()
+        self._reset_batch_segmentation_state()
         self._time_mask_base = None
         self._time_mask_folder = None
         self._time_mask_folder_mtime = None
         self._time_mask_file_map = None
         self.available_mask_timepoints = []
-        self._time_mask_base_4d = None
-        self._time_mask_folder_4d = None
-        self._time_mask_folder_mtime_4d = None
-        self._time_mask_file_map_4d = None
-        self.available_mask_timepoints_4d = []
 
         self.deleting_multiple = False
         self.removing_cells_list = []
@@ -2673,11 +2602,7 @@ class MainW(QMainWindow):
             self.start_segmentation_async(custom=True, time_index=seg_T)
 
 
-    def _reset_time_tracking_state(self):
-        self._seg_all_selected_timepoints = ()
-        self._seg_all_time_tracking_enabled = False
-        self._seg_all_tracking_max_distance = None
-        self._seg_all_cached_results = None
+    def _reset_batch_segmentation_state(self):
         self._seg_all_force_model_reload = False
         self._segmentation_result_handled = False
         self._segmentation_thread_finished_flag = False
@@ -2732,111 +2657,6 @@ class MainW(QMainWindow):
         self._segmentation_batch_advance_scheduled = True
         QtCore.QTimer.singleShot(0, self._segmentation_all_next)
 
-    @staticmethod
-    def _compact_positive_labels(labels):
-        """Map any positive label IDs to compact IDs [1..N], preserving background=0."""
-        arr = np.asarray(labels)
-        uniq = np.unique(arr)
-        uniq = uniq[uniq > 0]
-        if uniq.size == 0:
-            return np.zeros(arr.shape, dtype=np.int32), uniq
-
-        flat = arr.reshape(-1)
-        idx = np.searchsorted(uniq, flat)
-        safe_idx = np.clip(idx, 0, uniq.size - 1)
-        valid = (flat > 0) & (idx < uniq.size) & (uniq[safe_idx] == flat)
-        compact_flat = np.zeros(flat.shape[0], dtype=np.int32)
-        compact_flat[valid] = safe_idx[valid] + 1
-        return compact_flat.reshape(arr.shape), uniq
-
-    def _stitch_masks_over_time(self, masks, time_index):
-        """
-        Keep stable ROI IDs across adjacent timepoints by greedy IOU matching.
-        Unmatched current ROIs receive new global IDs.
-        """
-        curr_compact, _ = self._compact_positive_labels(masks)
-        n_curr = int(curr_compact.max()) if curr_compact.size else 0
-        if n_curr == 0:
-            stitched = np.zeros_like(curr_compact, dtype=np.uint16)
-            self._seg_all_time_prev_masks = stitched.copy()
-            return stitched
-
-        curr_to_global = np.zeros(n_curr + 1, dtype=np.int64)
-        prev_masks = getattr(self, "_seg_all_time_prev_masks", None)
-        next_label = int(getattr(self, "_seg_all_time_next_label", 1))
-        threshold = float(getattr(self, "_seg_all_time_stitch_threshold", 0.25))
-
-        if (
-            isinstance(prev_masks, np.ndarray)
-            and prev_masks.size > 0
-            and prev_masks.shape == curr_compact.shape
-        ):
-            prev_compact, prev_global_ids = self._compact_positive_labels(prev_masks)
-            if prev_global_ids.size > 0:
-                iou = metrics._intersection_over_union(curr_compact, prev_compact)[1:, 1:]
-                if iou.size > 0:
-                    pairs = np.argwhere(iou >= threshold)
-                    if pairs.size > 0:
-                        scores = iou[pairs[:, 0], pairs[:, 1]]
-                        order = np.argsort(scores)[::-1]
-                        used_curr = np.zeros(n_curr + 1, dtype=bool)
-                        used_prev = np.zeros(prev_global_ids.size + 1, dtype=bool)
-                        for oi in order:
-                            c_id = int(pairs[oi, 0]) + 1
-                            p_id = int(pairs[oi, 1]) + 1
-                            if used_curr[c_id] or used_prev[p_id]:
-                                continue
-                            curr_to_global[c_id] = int(prev_global_ids[p_id - 1])
-                            used_curr[c_id] = True
-                            used_prev[p_id] = True
-        elif isinstance(prev_masks, np.ndarray) and prev_masks.size > 0:
-            print(
-                "GUI_WARNING: skipping time-stitch for "
-                f"T={time_index} (shape changed from {prev_masks.shape} to {curr_compact.shape})"
-            )
-
-        unmatched = np.where(curr_to_global[1:] == 0)[0] + 1
-        if unmatched.size > 0:
-            new_ids = np.arange(next_label, next_label + unmatched.size, dtype=np.int64)
-            curr_to_global[unmatched] = new_ids
-            next_label = int(new_ids[-1]) + 1
-        else:
-            next_label = max(next_label, int(curr_to_global.max()) + 1)
-
-        stitched = curr_to_global[curr_compact]
-        max_label = int(stitched.max()) if stitched.size else 0
-        if max_label < 2**16:
-            stitched = stitched.astype(np.uint16, copy=False)
-        elif max_label < 2**32:
-            stitched = stitched.astype(np.uint32, copy=False)
-
-        self._seg_all_time_prev_masks = stitched.copy()
-        self._seg_all_time_next_label = next_label
-        return stitched
-
-    @staticmethod
-    def _stitch_masks_over_z(masks, stitch_threshold=0.25):
-        """Stitch ROI IDs across adjacent Z planes for one timepoint volume."""
-        arr = np.asarray(masks)
-        if arr.ndim != 3 or arr.shape[0] <= 1:
-            return arr
-        try:
-            th = float(stitch_threshold)
-        except Exception:
-            th = 0.25
-        if th < 0.0:
-            th = 0.0
-        if th > 1.0:
-            th = 1.0
-        arr_i = arr.astype(np.int32, copy=True)
-        stitched = stitch3D(arr_i, stitch_threshold=th)
-        max_label = int(stitched.max()) if stitched.size else 0
-        if max_label < 2**16:
-            return stitched.astype(np.uint16, copy=False)
-        if max_label < 2**32:
-            return stitched.astype(np.uint32, copy=False)
-        return stitched
-
     def _cache_segmentation_result(self, masks, time_index, preserve_labels=False):
         """Cache per-timepoint segmentation in memory for live browsing and export."""
         if time_index is None:
@@ -2844,13 +2664,6 @@ class MainW(QMainWindow):
         try:
             t = int(time_index)
             masks_arr = np.asarray(masks)
-            is_batch_run = bool(self._segmentation_all_running)
-            tracking_enabled = bool(
-                getattr(self, "_seg_all_time_tracking_enabled", False)
-            )
-            cache_for_tracking = is_batch_run and tracking_enabled
-            cache_for_browsing = (not is_batch_run) or (not tracking_enabled)
-
             entry = {
                 "masks": masks_arr.copy(),
                 "outlines": None,
@@ -2859,136 +2672,11 @@ class MainW(QMainWindow):
                 "axes": "ZYX" if masks_arr.ndim == 3 else "YX",
                 "preserve_labels": bool(preserve_labels),
             }
-
-            if cache_for_browsing:
-                if not isinstance(self.seg_time_data, dict):
-                    self.seg_time_data = {}
-                self.seg_time_data[t] = entry
-
-            if cache_for_tracking:
-                if not isinstance(self._seg_all_cached_results, dict):
-                    self._seg_all_cached_results = {}
-                # Reuse one object so large 3D masks are not duplicated in RAM.
-                self._seg_all_cached_results[t] = entry
+            if not isinstance(self.seg_time_data, dict):
+                self.seg_time_data = {}
+            self.seg_time_data[t] = entry
         except Exception as e:
             print(f"ERROR: could not cache segmentation for T={time_index}: {e}")
-
-    def _cache_tracked_timepoint_result(self, masks, time_index):
-        """Cache Ultrack-tracked masks in the 4D result store."""
-        try:
-            t = int(time_index)
-            if not isinstance(getattr(self, "seg_time_data_4d", None), dict):
-                self.seg_time_data_4d = {}
-            masks_arr = np.asarray(masks)
-            self.seg_time_data_4d[t] = {
-                "masks": masks_arr.copy(),
-                "outlines": None,
-                "colors": None,
-                "time_index": t,
-                "axes": "ZYX" if masks_arr.ndim == 3 else "YX",
-                "preserve_labels": True,
-            }
-        except Exception as e:
-            print(f"ERROR: could not cache Ultrack result for T={time_index}: {e}")
-
-    def _track_cached_timepoints_with_ultrack(self):
-        """Run Ultrack over the cached masks from the latest multi-timepoint run."""
-        if not getattr(self, "_seg_all_time_tracking_enabled", False):
-            return
-
-        per_time = getattr(self, "_seg_all_cached_results", None)
-        if not isinstance(per_time, dict) or len(per_time) == 0:
-            per_time = getattr(self, "seg_time_data", None)
-        if not isinstance(per_time, dict) or len(per_time) == 0:
-            print("GUI_WARNING: no cached timepoints available for Ultrack tracking")
-            return
-
-        selected = []
-        for t in getattr(self, "_seg_all_selected_timepoints", ()):
-            t_int = int(t)
-            if isinstance(per_time.get(t_int), dict) and "masks" in per_time[t_int]:
-                selected.append(t_int)
-        if len(selected) == 0:
-            selected = sorted(int(t) for t in per_time.keys())
-        if len(selected) == 0:
-            print("GUI_WARNING: no valid cached masks available for Ultrack tracking")
-            return
-
-        labels_by_time = {}
-        for t in selected:
-            entry = per_time.get(int(t))
-            if not isinstance(entry, dict) or "masks" not in entry:
-                continue
-            labels_by_time[int(t)] = np.asarray(entry["masks"]).copy()
-        if len(labels_by_time) == 0:
-            print("GUI_WARNING: cached mask entries are empty; skipping Ultrack tracking")
-            return
-
-        max_distance = getattr(self, "_seg_all_tracking_max_distance", None)
-        tracking_cfg = UltrackTrackingConfig(max_distance=max_distance)
-        range_text = (
-            f"T={selected[0]}..{selected[-1]}"
-            if len(selected) > 1
-            else f"T={selected[0]}"
-        )
-        if max_distance is None:
-            print(
-                "GUI_INFO: starting Ultrack tracking over "
-                f"{range_text} ({len(selected)} timepoints)"
-            )
-        else:
-            print(
-                "GUI_INFO: starting Ultrack tracking over "
-                f"{range_text} ({len(selected)} timepoints, max_distance={max_distance:.3f})"
-            )
-
-        self.progress.setValue(5)
-        tracking_result = track_labels_with_ultrack(labels_by_time, tracking_cfg)
-        self.progress.setValue(70)
-
-        if not isinstance(getattr(self, "seg_time_data_4d", None), dict):
-            self.seg_time_data_4d = {}
-        else:
-            self.seg_time_data_4d.clear()
-
-        base = os.path.splitext(self.filename)[0]
-        save_dir = base + "_cp_masks_4d_by_time"
-        for t, tracked_masks in tracking_result.as_time_dict().items():
-            self._cache_tracked_timepoint_result(tracked_masks, t)
-            io._save_timepoint_mask_tiff(
-                self,
-                t,
-                masks=tracked_masks,
-                base=base,
-                output_folder=save_dir,
-                cache_as_stitched=True,
-            )
-
-        try:
-            ome_out = io._default_ome_output_from_mask_folder(save_dir)
-            ome_path, nt, shape, out_dtype = io.combine_timepoint_masks_folder_to_ome(
-                save_dir,
-                output_path=ome_out,
-                strict_shape=False,
-                compression="zlib",
-            )
-            print(
-                f"GUI_INFO: wrote tracked 4D OME-TIFF {ome_path} "
-                f"shape=(T={nt}, Z={shape[0]}, Y={shape[1]}, X={shape[2]}) "
-                f"dtype={np.dtype(out_dtype).name}"
-            )
-        except Exception as e:
-            print(
-                "GUI_WARNING: tracked by-time masks were saved, but building 4D OME-TIFF failed "
-                f"({e})"
-            )
-
-        self.progress.setValue(100)
-        print(
-            "GUI_INFO: completed Ultrack tracking -> "
-            f"{len(tracking_result.time_indices)} timepoints written in {save_dir}"
-        )
-
 
     def compute_segmentation_all_timepoints(self, custom=False):
         """Run segmentation for a selected timepoint range in a 5D stack.
@@ -2997,7 +2685,6 @@ class MainW(QMainWindow):
         this iterates over the selected time indices and calls `compute_segmentation`
         at each timepoint, reusing the same model for speed.
 
-        Optionally, Ultrack can assign consistent ROI IDs across adjacent timepoints.
         """
         if self._segmentation_running or self._segmentation_all_running:
             print("GUI_INFO: segmentation already running; please wait for it to finish")
@@ -3048,32 +2735,7 @@ class MainW(QMainWindow):
             f"T={selected_timepoints[0]}..{selected_timepoints[-1]} "
             f"({len(selected_timepoints)} total)"
         )
-        self._reset_time_tracking_state()
-        self._seg_all_selected_timepoints = tuple(selected_timepoints)
-        self._seg_all_cached_results = {}
-        try:
-            self._seg_all_time_tracking_enabled = bool(
-                getattr(self.segmentation_settings, "track_over_time", False)
-            )
-            self._seg_all_tracking_max_distance = float(
-                getattr(self.segmentation_settings, "tracking_max_distance", 15.0)
-            )
-        except Exception:
-            self._seg_all_time_tracking_enabled = False
-            self._seg_all_tracking_max_distance = None
-        if self._seg_all_time_tracking_enabled and len(selected_timepoints) < 2:
-            print(
-                "GUI_INFO: Ultrack tracking needs at least two timepoints; "
-                "continuing with segmentation only"
-            )
-            self._seg_all_time_tracking_enabled = False
-            self._seg_all_tracking_max_distance = None
-        if self._seg_all_time_tracking_enabled:
-            print(
-                "GUI_INFO: Ultrack time tracking enabled "
-                f"(max_distance={float(self._seg_all_tracking_max_distance):.3f})"
-            )
-            self.seg_time_data_4d = {}
+        self._reset_batch_segmentation_state()
         self._seg_all_force_model_reload = True
         print(
             "GUI_INFO: reloading the segmentation model between timepoints "
@@ -3090,11 +2752,6 @@ class MainW(QMainWindow):
             return
 
         if len(self._seg_all_queue) == 0:
-            if getattr(self, "_seg_all_time_tracking_enabled", False):
-                try:
-                    self._track_cached_timepoints_with_ultrack()
-                except Exception as e:
-                    print(f"ERROR: Ultrack tracking failed after segmentation: {e}")
             # finished all timepoints; mark complete and restore the timepoint
             # the user was on when the run started
             print(
@@ -3105,7 +2762,7 @@ class MainW(QMainWindow):
             self._segmentation_running = False
             self._seg_all_current_t = None
             self._seg_all_total = 0
-            self._reset_time_tracking_state()
+            self._reset_batch_segmentation_state()
             try:
                 t_restore = int(getattr(self, "_seg_all_original_T", 0))
                 if getattr(self, "has_time", False) and int(getattr(self, "NT", 1)) > 1:
@@ -3186,11 +2843,7 @@ class MainW(QMainWindow):
         self._current_seg_time_index = seg_T
 
         do_3D = self.load_3D
-        stitch_threshold = (
-            float(self.stitch_threshold.text())
-            if not isinstance(self.stitch_threshold, float)
-            else self.stitch_threshold
-        )
+        stitch_threshold = 0.0
         anisotropy = (
             float(self.anisotropy.text())
             if not isinstance(self.anisotropy, float)
@@ -3207,9 +2860,6 @@ class MainW(QMainWindow):
             else self.min_size
         )
         downscale = getattr(self.segmentation_settings, "downscale_factor", 1.0)
-
-        do_3D = False if stitch_threshold > 0.0 else do_3D
-        fallback_stitch_threshold = stitch_threshold if stitch_threshold > 0.0 else 0.0
 
         # choose segmentation data
         # Always pick data by explicit time index (seg_T) to decouple from GUI slider.
@@ -3257,20 +2907,17 @@ class MainW(QMainWindow):
         normalize_params = self.get_normalize_params()
         print(normalize_params)
 
-        # Cellpose expects different axis hints for true 3D stacks versus
-        # 2D slices that may be stitched back over Z.
         if do_3D and data.ndim >= 3 and int(getattr(self, "NZ", 1)) > 1:
             z_axis = 0
         else:
             z_axis = None
 
-        if data.ndim == 4:
-            channel_axis = -1 if do_3D else None
+        if z_axis is not None and data.ndim == 3:
+            channel_axis = None
+        elif z_axis is not None and data.ndim == 4:
+            channel_axis = -1
         elif data.ndim == 3:
-            if int(getattr(self, "NZ", 1)) > 1 and (do_3D or stitch_threshold > 0.0):
-                channel_axis = None
-            else:
-                channel_axis = -1
+            channel_axis = -1
         else:
             channel_axis = None
 
@@ -3290,7 +2937,6 @@ class MainW(QMainWindow):
             "normalize_params": normalize_params,
             "z_axis": z_axis,
             "channel_axis": channel_axis,
-            "fallback_stitch_threshold": fallback_stitch_threshold,
             "time_index": seg_T,
         }
         return cfg
@@ -3321,63 +2967,25 @@ class MainW(QMainWindow):
             normalize_params = cfg["normalize_params"]
             z_axis = cfg["z_axis"]
             channel_axis = cfg["channel_axis"]
-            fallback_stitch_threshold = cfg.get(
-                "fallback_stitch_threshold", stitch_threshold
-            )
             tic = cfg["tic"]
 
             try:
-                eval_do_3d = bool(do_3D)
-                eval_stitch_threshold = float(stitch_threshold)
-                eval_anisotropy = anisotropy
-                try:
-                    masks, flows = self.model.eval(
-                        data,
-                        diameter=diameter,
-                        cellprob_threshold=cellprob_threshold,
-                        flow_threshold=flow_threshold,
-                        do_3D=eval_do_3d,
-                        niter=niter,
-                        normalize=normalize_params,
-                        stitch_threshold=eval_stitch_threshold,
-                        anisotropy=eval_anisotropy,
-                        flow3D_smooth=flow3D_smooth,
-                        min_size=min_size,
-                        channel_axis=channel_axis,
-                        progress=self.progress,
-                        z_axis=z_axis,
-                    )[:2]
-                except RuntimeError as e:
-                    if not eval_do_3d:
-                        raise
-                    try:
-                        fallback_stitch = float(fallback_stitch_threshold)
-                    except Exception:
-                        fallback_stitch = 0.0
-                    fallback_stitch = max(0.0, min(1.0, fallback_stitch))
-                    eval_do_3d = False
-                    eval_stitch_threshold = fallback_stitch
-                    eval_anisotropy = None
-                    print(
-                        "GUI_WARNING: 3D segmentation failed; retrying in 2D mode "
-                        f"(stitch_threshold={eval_stitch_threshold:.3f}). Error: {e}"
-                    )
-                    masks, flows = self.model.eval(
-                        data,
-                        diameter=diameter,
-                        cellprob_threshold=cellprob_threshold,
-                        flow_threshold=flow_threshold,
-                        do_3D=eval_do_3d,
-                        niter=niter,
-                        normalize=normalize_params,
-                        stitch_threshold=eval_stitch_threshold,
-                        anisotropy=eval_anisotropy,
-                        flow3D_smooth=flow3D_smooth,
-                        min_size=min_size,
-                        channel_axis=channel_axis,
-                        progress=self.progress,
-                        z_axis=z_axis,
-                    )[:2]
+                masks, flows = self.model.eval(
+                    data,
+                    diameter=diameter,
+                    cellprob_threshold=cellprob_threshold,
+                    flow_threshold=flow_threshold,
+                    do_3D=do_3D,
+                    niter=niter,
+                    normalize=normalize_params,
+                    stitch_threshold=stitch_threshold,
+                    anisotropy=anisotropy,
+                    flow3D_smooth=flow3D_smooth,
+                    min_size=min_size,
+                    channel_axis=channel_axis,
+                    progress=self.progress,
+                    z_axis=z_axis,
+                )[:2]
             except Exception as e:
                 print("NET ERROR: %s" % e)
                 self.progress.setValue(0)
@@ -3389,8 +2997,8 @@ class MainW(QMainWindow):
                 masks,
                 flows,
                 load_3D=self.load_3D,
-                do_3D=eval_do_3d,
-                stitch_threshold=eval_stitch_threshold,
+                do_3D=do_3D,
+                stitch_threshold=stitch_threshold,
                 downscale=downscale,
                 Ly=self.Ly,
                 Lx=self.Lx,
@@ -3531,18 +3139,13 @@ class MainW(QMainWindow):
             if is_batch_run:
                 try:
                     base = os.path.splitext(self.filename)[0]
-                    save_dir = (
-                        base + "_cp_masks_4d_by_time"
-                        if preserve_labels
-                        else base + "_cp_masks_by_time"
-                    )
+                    save_dir = base + "_cp_masks_by_time"
                     io._save_timepoint_mask_tiff(
                         self,
                         seg_time_index,
                         masks=masks,
                         base=base,
                         output_folder=save_dir,
-                        cache_as_stitched=bool(preserve_labels),
                     )
                 except Exception as e:
                     print(
@@ -3622,4 +3225,4 @@ class MainW(QMainWindow):
                 self._segmentation_all_running = False
                 self._seg_all_current_t = None
                 self._seg_all_total = 0
-                self._reset_time_tracking_state()
+                self._reset_batch_segmentation_state()

@@ -100,7 +100,8 @@ def run(image=None):
     app.setWindowIcon(app_icon)
     app.setStyle("Fusion")
     app.setPalette(guiparts.DarkPalette())
-    MainW_3d(image=image, logger=logger)
+    main_window = MainW_3d(image=image, logger=logger)
+    app._cellpose_main_window = main_window
     ret = app.exec_()
     sys.exit(ret)
 
@@ -145,9 +146,9 @@ class MainW_3d(MainW):
 
         b = 22
 
-        label = QLabel("stitch\nthreshold:")
+        label = QLabel("3D\nmode:")
         label.setToolTip(
-            "for 3D volumes, turn on stitch_threshold to stitch masks across planes instead of running cellpose in 3D (see docs for details)"
+            "Z-stitch mode is disabled in this build. 3D stacks always run with Cellpose do_3D."
         )
         label.setFont(self.medfont)
         self.segBoxG.addWidget(label, b, 0, 1, 4)
@@ -155,8 +156,10 @@ class MainW_3d(MainW):
         self.stitch_threshold.setText("0.0")
         self.stitch_threshold.setFixedWidth(30)
         self.stitch_threshold.setFont(self.medfont)
+        self.stitch_threshold.setReadOnly(True)
+        self.stitch_threshold.setEnabled(False)
         self.stitch_threshold.setToolTip(
-            "for 3D volumes, turn on stitch_threshold to stitch masks across planes instead of running cellpose in 3D (see docs for details)"
+            "Z-stitch mode is disabled in this build. 3D stacks always run with Cellpose do_3D."
         )
         self.segBoxG.addWidget(self.stitch_threshold, b, 3, 1, 1)
 
@@ -350,25 +353,16 @@ class MainW_3d(MainW):
 
     def move_in_Z(self):
         if self.loaded:
-            self.currentZ = min(self.NZ, max(0, int(self.scroll.value())))
+            self.currentZ = min(self.NZ - 1, max(0, int(self.scroll.value())))
             self.zpos.setText(str(self.currentZ))
             if hasattr(self, "lazy_data") and self.lazy_data is not None:
-                cache_key = (getattr(self, "currentT", 0), self.currentZ)
-                plane = None
-                if hasattr(self, "time_cache") and self.time_cache is not None:
-                    plane = self.time_cache.get(cache_key)
-                if plane is None:
-                    try:
-                        plane = self.lazy_data.get_plane(self.currentT, self.currentZ)
-                        plane = plane.astype(np.float32)
-                        pmin, pmax = plane.min(), plane.max()
-                        if pmax > pmin + 1e-3:
-                            plane = (plane - pmin) / (pmax - pmin) * 255.
-                    except Exception as e:
-                        print(f"ERROR fetching plane T{self.currentT} Z{self.currentZ}: {e}")
-                        plane = self.stack[0] if getattr(self.stack, "ndim", 0) >= 3 else self.stack
-                # keep only current plane in cache
-                self.time_cache = {cache_key: plane}
+                try:
+                    plane = io._get_lazy_display_plane(
+                        self, getattr(self, "currentT", 0), self.currentZ
+                    )
+                except Exception as e:
+                    print(f"ERROR fetching plane T{self.currentT} Z{self.currentZ}: {e}")
+                    plane = self.stack[0] if getattr(self.stack, "ndim", 0) >= 3 else self.stack
                 self.stack = plane[np.newaxis, ...]
             self.update_plot()
             self.draw_layer()

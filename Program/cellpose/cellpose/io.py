@@ -78,28 +78,28 @@ class LazySldy:
         self.nc = self.reader.GetNumChannels(self.capture)
         self.ny = self.reader.GetNumYRows(self.capture)
         self.nx = self.reader.GetNumXColumns(self.capture)
-        self.axes = "TZCYX"
-        self.shape = (self.nt, self.nz, self.nc, self.ny, self.nx)
+        self.channel_index = 0
+        if self.nc > 1:
+            io_logger.info(
+                "SlideBook loader using channel 0 only for 4D TZYX stack; "
+                f"{self.nc} channels available"
+            )
+        self.axes = "TZYX"
+        self.shape = (self.nt, self.nz, self.ny, self.nx)
         self.dtype = np.uint16
 
     def get_plane(self, t_index, z_index):
-        # only load up to 3 channels; CPSAM ignores any beyond this
-        n_use = min(self.nc, 3)
-        planes = []
-        for c in range(n_use):
-            arr = self.reader.mDL.ReadPlane(
-                self.capture, self.position, t_index, z_index, c, inAs2D=True
-            )
-            planes.append(arr)
-        plane = np.stack(planes, axis=-1)
-        if plane.shape[-1] < 3:
-            out = np.zeros((*plane.shape[:-1], 3), dtype=plane.dtype)
-            out[..., :plane.shape[-1]] = plane
-            plane = out
-        return plane
+        return self.reader.ReadImagePlaneBuf(
+            self.capture,
+            self.position,
+            t_index,
+            z_index,
+            self.channel_index,
+            True,
+        )
 
     def get_time_stack(self, t_index):
-        """Return full Z stack for a given time index as (Z, Y, X, C)."""
+        """Return full Z stack for a given time index as (Z, Y, X)."""
         planes = []
         for z in range(self.nz):
             planes.append(self.get_plane(t_index, z))

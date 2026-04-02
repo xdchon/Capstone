@@ -414,31 +414,6 @@ class SegmentationSettings(QWidget):
         self.time_range_end_box.setValidator(QIntValidator(-1, 1_000_000))
         grid_layout.addWidget(self.time_range_end_box, row, 7, 1, 1)
 
-        row += 1
-        self.track_over_time_cb = QCheckBox("track ROI IDs across time (Ultrack)")
-        self.track_over_time_cb.setFont(font)
-        self.track_over_time_cb.setToolTip(
-            "when segmenting a timepoint range, run Ultrack on the finished label masks\n"
-            "to keep ROI IDs consistent across time without using greedy IOU stitching."
-        )
-        grid_layout.addWidget(self.track_over_time_cb, row, 0, 1, 8)
-
-        row += 1
-        tracking_max_distance_label = QLabel("tracking max dist:")
-        tracking_max_distance_label.setToolTip(
-            "Ultrack linking max_distance. Larger values allow matches across larger frame-to-frame motion."
-        )
-        tracking_max_distance_label.setFont(font)
-        grid_layout.addWidget(tracking_max_distance_label, row, 0, 1, 4)
-        self.tracking_max_distance_box = QLineEdit()
-        self.tracking_max_distance_box.setText("15.0")
-        self.tracking_max_distance_box.setFixedWidth(48)
-        self.tracking_max_distance_box.setFont(font)
-        self.tracking_max_distance_box.setToolTip(
-            "Ultrack linking max_distance for timepoint-to-timepoint tracking."
-        )
-        grid_layout.addWidget(self.tracking_max_distance_box, row, 4, 1, 2)
-
         self.segment_all_timepoints_cb.toggled.connect(self._update_time_range_enabled)
         self._update_time_range_enabled()
         self.setLayout(grid_layout)
@@ -448,8 +423,6 @@ class SegmentationSettings(QWidget):
         for widget in (
             self.time_range_start_box,
             self.time_range_end_box,
-            self.track_over_time_cb,
-            self.tracking_max_distance_box,
         ):
             widget.setEnabled(enabled)
 
@@ -600,38 +573,6 @@ class SegmentationSettings(QWidget):
         if end_raw >= 0:
             self.time_range_end_box.setText(str(end))
         return start, end
-
-    @property
-    def track_over_time(self):
-        """Whether to run Ultrack over the selected timepoint range."""
-        return self.track_over_time_cb.isChecked()
-
-    @property
-    def stitch_over_time(self):
-        """Backward-compatible alias for the old stitch toggle."""
-        return self.track_over_time
-
-    @property
-    def tracking_max_distance(self):
-        """Ultrack linking max_distance used for timepoint-to-timepoint tracking."""
-        text = self.tracking_max_distance_box.text().strip()
-        try:
-            val = float(text)
-        except ValueError:
-            val = 15.0
-        if val < 0.0:
-            val = 0.0
-        self.tracking_max_distance_box.setText(
-            f"{val:.3f}".rstrip("0").rstrip(".")
-        )
-        return val
-
-    @property
-    def time_stitch_threshold(self):
-        """Backward-compatible alias for the old IOU field name."""
-        return self.tracking_max_distance
-
-
 
 class TrainWindow(QDialog):
 
