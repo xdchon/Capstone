@@ -116,6 +116,110 @@ def _pad_display_channels(arr):
     return out
 
 
+def _shape_looks_2d_multichannel(shape):
+    if len(shape) != 3:
+        return False
+    first, middle, last = shape
+    if middle <= 4:
+        return False
+    return (first <= 4 and last > 4) or (last <= 4 and first > 4)
+
+
+def _infer_tiff_load_3d(filename):
+    with tifffile.TiffFile(filename) as tif:
+        if not tif.series:
+            return None
+        series = tif.series[0]
+        shape = tuple(int(v) for v in series.shape)
+        axes = (getattr(series, "axes", "") or "").upper()
+
+        if len(shape) <= 2:
+            return False
+        if "T" in axes or "Z" in axes:
+            return True
+        if any(ax in axes for ax in ("C", "S")) and "Z" not in axes and "T" not in axes:
+            return False
+        if len(shape) >= 4:
+            return True
+
+        page_shape = None
+        try:
+            page_shape = tuple(int(v) for v in series[0].shape)
+        except Exception:
+            try:
+                page_shape = tuple(int(v) for v in tif.pages[0].shape)
+            except Exception:
+                page_shape = None
+
+        if page_shape is not None:
+            if shape == page_shape:
+                return False
+            if shape[1:] == page_shape:
+                return True
+
+        if _shape_looks_2d_multichannel(shape):
+            return False
+        return True
+
+
+def _should_load_as_3d(filename, requested_load_3d=False):
+    ext = os.path.splitext(filename)[-1].lower()
+    if ext in (".sldy", ".sldyz"):
+        return True
+    if ext in (".png", ".jpg", ".jpeg"):
+        return False
+    if ext in (".tif", ".tiff", ".btf", ".flex"):
+        try:
+            inferred = _infer_tiff_load_3d(filename)
+            if inferred is not None:
+                return inferred
+        except Exception:
+            pass
+
+    try:
+        img = imread(filename)
+    except Exception:
+        img = None
+
+    if img is None:
+        return bool(requested_load_3d)
+    if hasattr(img, "get_time_stack"):
+        return True
+
+    arr = np.asarray(img)
+    if arr.ndim <= 2:
+        return False
+    if arr.ndim >= 4:
+        return True
+    if _shape_looks_2d_multichannel(arr.shape):
+        return False
+    return True
+
+
+def _read_image_for_gui(filename, requested_load_3d=False):
+    load_3D = _should_load_as_3d(filename, requested_load_3d=requested_load_3d)
+    primary_loader = imread_3D if load_3D else imread_2D
+    fallback_loader = imread_2D if load_3D else None
+
+    primary_error = None
+    try:
+        image = primary_loader(filename)
+    except Exception as e:
+        image = None
+        primary_error = e
+
+    if image is None and fallback_loader is not None:
+        try:
+            image = fallback_loader(filename)
+            load_3D = False
+        except Exception:
+            image = None
+
+    if image is None and primary_error is not None:
+        raise primary_error
+    return image, load_3D
+
+
 def _coerce_gui_stack(image, load_3D):
     arr = np.asarray(image)
     if arr.ndim == 2:
@@ -156,19 +260,19 @@ def _get_lazy_display_plane(parent, t_index=None, z_index=None, source=None):
     return plane
 
 
-def _load_image(parent, filename=None, load_seg=True, load_3D=False):
+def _load_image(parent, filename=None, load_seg=True, load_3D=None):
     """ load image with filename; if None, open QFileDialog
     if image is grey change view to default to grey scale 
     """
-
-    if parent.load_3D:
-        load_3D = True
 
     if filename is None:
         name = QFileDialog.getOpenFileName(parent, "Load image")
         filename = name[0]
         if filename == "":
             return
+    requested_load_3d = (
+        bool(getattr(parent, "load_3D", False)) if load_3D is None else bool(load_3D)
+    )
     base, ext = os.path.splitext(filename)
     manual_file = base + "_seg.npy"
     load_mask = False
@@ -177,7 +281,10 @@ def _load_image(parent, filename=None, load_seg=True, load_3D=False):
         # regardless of the autoloadMasks setting.
         if os.path.isfile(manual_file) and ext.lower() in (".tif", ".tiff", ".btf", ".flex"):
             if filename is not None:
-                image = imread_3D(filename) if load_3D or parent.load_3D else imread_2D(filename)
+                image, load_3D = _read_image_for_gui(
+                    filename,
+                    requested_load_3d=requested_load_3d,
+                )
             else:
                 image = None
             # if seg load fails, continue to load image instead of aborting
@@ -187,8 +294,10 @@ def _load_image(parent, filename=None, load_seg=True, load_3D=False):
         # Original behavior for other formats (or when *_seg.npy is missing)
         if os.path.isfile(manual_file) and not parent.autoloadMasks.isChecked():
             if filename is not None:
-                image = (imread_2D(filename) if not load_3D else 
-                         imread_3D(filename))
+                image, load_3D = _read_image_for_gui(
+                    filename,
+                    requested_load_3d=requested_load_3d,
+                )
             else:
                 image = None
             # if seg load fails, continue to load image instead of aborting
@@ -202,10 +311,10 @@ def _load_image(parent, filename=None, load_seg=True, load_3D=False):
     parent.show_loading("Loading image...")
     try:
         print(f"GUI_INFO: loading image: {filename}")
-        if not load_3D:
-            image = imread_2D(filename)
-        else:
-            image = imread_3D(filename)
+        image, load_3D = _read_image_for_gui(
+            filename,
+            requested_load_3d=requested_load_3d,
+        )
         parent.loaded = True
     except Exception as e:
         print("ERROR: images not compatible")
@@ -370,14 +479,17 @@ def _load_image(parent, filename=None, load_seg=True, load_3D=False):
     parent.hide_loading()
 
         
-def _initialize_images(parent, image, load_3D=False, time_stack=None, currentT=None, use_lazy=False):
+def _initialize_images(parent, image, load_3D=None, time_stack=None, currentT=None, use_lazy=False):
     """ format image for GUI
 
     assumes display stacks are Z x Y x X x C and raw time stacks are T x Z x Y x X
     or T x Z x Y x X x C
 
     """
-    load_3D = parent.load_3D if load_3D is False else load_3D
+    if load_3D is None:
+        load_3D = bool(getattr(parent, "load_3D", False))
+    else:
+        load_3D = bool(load_3D)
     already_normalized = False
     target_current_z = int(getattr(parent, "currentZ", 0))
 
@@ -443,8 +555,8 @@ def _initialize_images(parent, image, load_3D=False, time_stack=None, currentT=N
         if parent.has_time:
             image = parent.time_stack[parent.currentT]
             load_3D = True
-            parent.load_3D = True
         image = _coerce_gui_stack(image, load_3D)
+        parent.load_3D = bool(load_3D)
     parent.stack = image
     print(f"GUI_INFO: image shape: {image.shape}")
     parent.configure_timebar()
@@ -538,7 +650,7 @@ def _initialize_images(parent, image, load_3D=False, time_stack=None, currentT=N
         parent.currentZ = 0
 
 
-def _load_seg(parent, filename=None, image=None, image_file=None, load_3D=False):
+def _load_seg(parent, filename=None, image=None, image_file=None, load_3D=None):
     """ load *_seg.npy with filename; if None, open QFileDialog """
     if filename is None:
         name = QFileDialog.getOpenFileName(parent, "Load labelled data", filter="*.npy")
@@ -717,8 +829,15 @@ def _load_seg(parent, filename=None, image=None, image_file=None, load_3D=False)
         if found_image:
             try:
                 print(parent.filename)
-                image = (imread_2D(parent.filename) if not load_3D else 
-                         imread_3D(parent.filename))
+                requested_load_3d = (
+                    bool(getattr(parent, "load_3D", False))
+                    if load_3D is None
+                    else bool(load_3D)
+                )
+                image, load_3D = _read_image_for_gui(
+                    parent.filename,
+                    requested_load_3d=requested_load_3d,
+                )
             except:
                 parent.loaded = False
                 found_image = False
@@ -728,6 +847,8 @@ def _load_seg(parent, filename=None, image=None, image_file=None, load_3D=False)
             print(parent.filename)
             if "img" in dat:
                 image = dat["img"]
+                if load_3D is None:
+                    load_3D = np.asarray(dat["masks"]).ndim > 2
             else:
                 print("ERROR: no image file found and no image in npy")
                 return
