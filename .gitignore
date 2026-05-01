@@ -11,6 +11,10 @@ venv/
 .pytest_cache/
 
 # Local data / notes
-Program/NLI_DB
 timepoint_0000.tif
 TODO
+Program/NLI_DB/openai_api_key.txt
+Program/NLI_DB/projects/test.sqlite
+Program/NLI_DB/csv_projects/NEW_PROJECT/source_csv_files/17_4_26_MASTODON_EarlyDualColour_Flicker_640only_DCN_cropped_cp_spots-Spot.csv
+Program/NLI_DB/csv_projects/
+Program/NLI_DB/projects/TEST_Restult/nli_database_analysis/
