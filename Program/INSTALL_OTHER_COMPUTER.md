@@ -88,23 +88,31 @@ python Program\SBReadFile22-Python-main\segment_5d_cellpose.py --slide C:\path\t
 
 ## 5) Optional components
 
-### NLI database tools (`Program/NLI_DB`)
+### NLI CSV OpenAI tools (`Program/NLI_DB`)
 
 This folder is local-only by default (`.gitignore`), so copy it manually if needed.
 
 Install extra packages:
 
 ```powershell
-python -m pip install openai streamlit pandas
+python -m pip install openai streamlit
 ```
 
 Run:
 
 ```powershell
-python Program\NLI_DB\nli_cli.py
+python Program\NLI_DB\nli_cli.py path\to\data.csv --question "summarise the tracking columns"
 python Program\NLI_DB\nli_gui.py
 streamlit run Program\NLI_DB\nli_streamlit.py
 ```
+
+The recommended interface is now the desktop app:
+
+```powershell
+python Program\NLI_DB\nli_gui.py
+```
+
+In the app, create/open a CSV project folder, add one or more CSV files, select one CSV in `Dataset scope`, then ask analysis-mode questions or use `Generate Report`. Chat and report generation send the selected CSV directly to OpenAI.
 
 ### MATLAB bridge (`SldyToMATLAB.py`)
 
